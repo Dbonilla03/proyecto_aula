@@ -11,7 +11,7 @@ Este programa es la implementación de caja blanca (Entregable 2):
 3. Persistencia de Evaluaciones: GestorHistorial (JSON en disco)
 4. Interfaz Gráfica: ControladorApp con diseño minimalista contemporáneo:
 - VistaInicio: Portal minimalista de bienvenida y acceso a flujos
-- VistaEvaluacion: Formulario de requisitos, dictamen, desempate y traza
+- VistaEvaluacion: Formulario de requisitos, dictamen y preguntas guiadas
 - VistaHistorial: Registro auditable de evaluaciones previas
 """
 
@@ -19,7 +19,6 @@ import os
 import re
 import sys
 import json
-import pprint
 import unicodedata
 from datetime import datetime
 
@@ -85,12 +84,6 @@ NOMBRE_PERFIL = {
     "empresarial": "Sistema Empresarial Complejo",
 }
 
-NOMBRE_NIVEL = {
-    1: "Nivel 1 · Validación preliminar",
-    2: "Nivel 2 · Inferencia intermedia",
-    3: "Nivel 3 · Conclusión final",
-}
-
 # Badges (Fondo suave, Texto oscuro temático)
 COLOR_PRIORIDAD = {
     "alta": (COLOR_EXITO_BG, COLOR_EXITO_TEXT),
@@ -107,7 +100,6 @@ COLOR_ROL = {
     "lider": "#4f46e5",          # Indigo líder
     "competencia": "#f59e0b",    # Amber competidor
     "otro": "#94a3b8",           # Slate neutro
-    "descartado": "#ef4444",     # Rose descartado
 }
 
 ESTADO_DICTAMEN = {
@@ -117,7 +109,7 @@ ESTADO_DICTAMEN = {
     ),
     "empate": (
         COLOR_AMBAR_BG, COLOR_AMBAR_TEXT,
-        "⚖ Empate técnico: Existen hipótesis muy cercanas en puntaje. Revise la pregunta de desempate."
+        "⚖ Empate técnico: Existen hipótesis muy cercanas en puntaje. Responda las preguntas guiadas."
     ),
     "insuficiente": (
         "#fff7ed", "#9a3412",
@@ -233,10 +225,11 @@ class PuenteProlog:
                 "Desconocidos, Suficiencia)")
         return self.una_solucion("diagnostico", meta)
 
-    def explicar(self, requisitos):
-        meta = (f"explicar_diagnostico({lista_prolog(requisitos)}, "
-                "Mejor, Reglas, Hechos, Descartadas)")
-        return self.una_solucion("explicacion", meta)
+    def candidatos(self, requisitos):
+        return self._lista("candidatos", f"candidatos({lista_prolog(requisitos)}, Lista)")
+
+    def descartes(self, requisitos):
+        return self._lista("descartes", f"descartes({lista_prolog(requisitos)}, Lista)")
 
     def que_falta(self, requisitos, negados=()):
         meta = (f"que_falta({lista_prolog(requisitos)}, {lista_prolog(negados)}, "
@@ -526,7 +519,7 @@ class VistaInicio(ttk.Frame):
         puntos = [
             "✔ Razonamiento Simbólico (Prolog)",
             "✔ Explicabilidad Completa (¿Por qué?)",
-            "✔ Heurística de Desempate (¿Qué falta?)"
+            "✔ Preguntas guiadas por el sistema experto"
         ]
         for p in puntos:
             tk.Label(
@@ -553,6 +546,7 @@ class VistaEvaluacion(ttk.Frame):
 
         self.vars = {}
         self.negados = []
+        self.respuestas = []   # [(requisito, aplica)] en orden de respuesta
         self._filas_comp = []
 
         # Encabezado
@@ -662,7 +656,7 @@ class VistaEvaluacion(ttk.Frame):
         col = ttk.Frame(padre, style="Fondo.TFrame")
         col.pack(side="left", fill="both", expand=True)
 
-        # Fila superior: Tarjeta Dictamen + Tarjeta Desempate
+        # Fila superior: Tarjeta Dictamen (ancho completo)
         fila_top = ttk.Frame(col, style="Fondo.TFrame")
         fila_top.pack(fill="x", pady=(0, 10))
 
@@ -683,7 +677,7 @@ class VistaEvaluacion(ttk.Frame):
 
         self.lbl_desc_estilo = tk.Label(
             self.card_dictamen, text="", font=(FUENTE_BASE, 10),
-            bg=COLOR_TARJETA, fg="#475569", wraplength=480, justify="left"
+            bg=COLOR_TARJETA, fg="#475569", wraplength=820, justify="left"
         )
         self.lbl_desc_estilo.pack(anchor="w", pady=(0, 8))
 
@@ -705,135 +699,94 @@ class VistaEvaluacion(ttk.Frame):
         # Mensaje de estado (Banner limpio)
         self.lbl_estado = tk.Label(
             self.card_dictamen, text="", font=(FUENTE_BASE, 9),
-            padx=12, pady=6, anchor="w", justify="left", wraplength=500
+            padx=12, pady=6, anchor="w", justify="left", wraplength=820
         )
         self.lbl_estado.pack(fill="x")
-
-        # Tarjeta Desempate Rápido ("¿Qué falta?")
-        self.card_pregunta = tk.Frame(
-            fila_top, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
-            highlightbackground=COLOR_BORDE, padx=16, pady=14, width=380
-        )
-        self.card_pregunta.pack(side="left", fill="both", padx=(10, 0))
-        self.card_pregunta.pack_propagate(False)
 
         # Cuaderno de Pestañas (Notebook)
         self.pestanas = ttk.Notebook(col)
         self.pestanas.pack(fill="both", expand=True)
 
+        self._pestana_preguntas()
         self._pestana_resumen()
-        self._pestana_por_que()
-        self._pestana_que_falta()
-        self._pestana_consultas()
+
+    def _pestana_preguntas(self):
+        tab = ttk.Frame(self.pestanas, padding=12)
+        self.pestanas.add(tab, text="  💬 Preguntas guiadas  ")
+
+        self.lbl_progreso = tk.Label(tab, text="", font=(FUENTE_BASE, 10, "bold"), fg=COLOR_TEXTO)
+        self.lbl_progreso.pack(anchor="w", pady=(0, 6))
+
+        # Tarjeta de la pregunta actual (se reconstruye en cada recálculo)
+        self.card_pregunta = tk.Frame(tab, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
+                                      highlightbackground=COLOR_BORDE, padx=18, pady=14)
+        self.card_pregunta.pack(fill="x", pady=(0, 10))
+
+        # Lista corta de respuestas dadas
+        card_resp = tk.Frame(tab, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
+                             highlightbackground=COLOR_BORDE, padx=14, pady=10)
+        card_resp.pack(fill="both", expand=True)
+
+        fila_cab = tk.Frame(card_resp, bg=COLOR_TARJETA)
+        fila_cab.pack(fill="x", pady=(0, 4))
+        tk.Label(fila_cab, text="RESPUESTAS DADAS", font=(FUENTE_BASE, 8, "bold"),
+                 bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(side="left")
+        self.btn_deshacer = ttk.Button(fila_cab, text="↶ Deshacer última", style="Suave.TButton",
+                                       command=self.deshacer_respuesta)
+        self.btn_deshacer.pack(side="right")
+
+        panel = PanelDesplazable(card_resp)
+        panel.pack(fill="both", expand=True)
+        for w in (panel, panel.canvas, panel.interior):
+            w.configure(bg=COLOR_TARJETA)
+        self.zona_respuestas = panel.interior
 
     def _pestana_resumen(self):
         tab = ttk.Frame(self.pestanas, padding=12)
         self.pestanas.add(tab, text="  📊 Resumen y Ranking  ")
 
-        tk.Label(tab, text="Comparativa de Estilos Arquitectónicos:",
-                 font=(FUENTE_BASE, 10, "bold"), fg=COLOR_TEXTO).pack(anchor="w", pady=(0, 6))
-
-        self.cv_comp = tk.Canvas(tab, bg=COLOR_TARJETA, highlightthickness=1,
-                                 highlightbackground=COLOR_BORDE, height=130)
-        self.cv_comp.pack(fill="x", pady=(0, 10))
-        self.cv_comp.bind("<Configure>", lambda _e: self._dibujar_comparacion())
-
-        card_txt = tk.Frame(tab, bg=COLOR_TARJETA, bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE)
-        card_txt.pack(fill="both", expand=True)
-
-        self.txt_resumen = tk.Text(card_txt, wrap="word", relief="flat", bg=COLOR_TARJETA,
-                                   font=(FUENTE_BASE, 10), padx=12, pady=10)
-        self.txt_resumen.pack(side="left", fill="both", expand=True)
-        sb = ttk.Scrollbar(card_txt, command=self.txt_resumen.yview)
-        self.txt_resumen.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-
-        t = self.txt_resumen
-        t.tag_configure("h", font=(FUENTE_BASE, 10, "bold"), foreground=COLOR_TEXTO, spacing1=8, spacing3=4)
-        t.tag_configure("ok", foreground=COLOR_EXITO_TEXT, lmargin1=12, lmargin2=28, spacing2=2)
-        t.tag_configure("mal", foreground=COLOR_PELIGRO_TEXT, lmargin1=12, lmargin2=28, spacing2=2)
-        t.tag_configure("aviso", foreground=COLOR_AMBAR_TEXT, lmargin1=12, lmargin2=28, spacing2=2)
-        t.tag_configure("gris", foreground=COLOR_TEXTO_MUTED, lmargin1=12, lmargin2=28)
-
-    def _pestana_por_que(self):
-        tab = ttk.Frame(self.pestanas, padding=12)
-        self.pestanas.add(tab, text="  🔍 ¿Por qué? (Traza Simbólica)  ")
-
-        tk.Label(tab, text="1. Reglas lógicas disparadas (inferencia encadenada):",
-                 font=(FUENTE_BASE, 10, "bold"), fg=COLOR_TEXTO).pack(anchor="w")
-        self.tv_reglas = self._crear_arbol(tab, ("regla", "detalle"), ("Regla", "Detalle de Inferencia"), (200, 600), alto=5, arbol=True)
-
-        tk.Label(tab, text="2. Hechos unificados como verdaderos:",
-                 font=(FUENTE_BASE, 10, "bold"), fg=COLOR_TEXTO).pack(anchor="w", pady=(4, 0))
-        self.tv_hechos = self._crear_arbol(tab, ("req", "desc", "grupo", "atrib"),
-                                           ("Requisito", "Descripción", "Grupo", "Atributo exigido"),
-                                           (160, 320, 100, 200), alto=3)
-
-        tk.Label(tab, text="3. Hipótesis alternativas descartadas:",
-                 font=(FUENTE_BASE, 10, "bold"), fg=COLOR_TEXTO).pack(anchor="w", pady=(4, 0))
-        self.tv_descartadas = self._crear_arbol(tab, ("estilo", "tipo", "detalle", "comparte"),
-                                                ("Estilo", "Motivo de Descarte", "Detalle", "Compartía"),
-                                                (200, 180, 260, 160), alto=3)
-        self.tv_descartadas.tag_configure("exclusion", foreground=COLOR_PELIGRO_TEXT, font=(FUENTE_BASE, 9, "bold"))
-        self.tv_descartadas.tag_configure("sin_evidencia", foreground=COLOR_AMBAR_TEXT, font=(FUENTE_BASE, 9))
-
-    def _pestana_que_falta(self):
-        tab = ttk.Frame(self.pestanas, padding=12)
-        self.pestanas.add(tab, text="  ❓ ¿Qué falta? (Desempate)  ")
-
-        card_info = tk.Frame(tab, bg=COLOR_TARJETA, bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE, padx=14, pady=10)
-        card_info.pack(fill="x", pady=(0, 10))
-
-        self.lbl_qf_estado = tk.Label(card_info, text="", font=(FUENTE_BASE, 10, "bold"),
-                                      bg=COLOR_TARJETA, fg=COLOR_TEXTO)
-        self.lbl_qf_estado.pack(anchor="w")
-
-        self.lbl_competencia = tk.Label(card_info, text="", font=(FUENTE_BASE, 9),
-                                        bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED)
-        self.lbl_competencia.pack(anchor="w", pady=(2, 0))
-
         panel = PanelDesplazable(tab)
         panel.pack(fill="both", expand=True)
-        self.zona_sugerencias = panel.interior
+        cuerpo = panel.interior
 
-    def _pestana_consultas(self):
-        tab = ttk.Frame(self.pestanas, padding=12)
-        self.pestanas.add(tab, text="  💻 Consultas a Prolog  ")
+        # Mensaje para la evaluación vacía
+        self.sec_vacio = tk.Label(cuerpo, text="Responde las preguntas para ver las opciones",
+                                  font=(FUENTE_BASE, 10), bg=COLOR_FONDO, fg=COLOR_TEXTO_MUTED)
 
-        card_code = tk.Frame(tab, bg="#0f172a", bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE)
-        card_code.pack(fill="both", expand=True)
+        # 1) Respuesta: estilo recomendado + razonamiento a favor
+        self.sec_respuesta = tk.Frame(cuerpo, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
+                                      highlightbackground=COLOR_BORDE, padx=18, pady=14)
+        tk.Label(self.sec_respuesta, text="RESPUESTA DEL SISTEMA EXPERTO", font=(FUENTE_BASE, 8, "bold"),
+                 bg=COLOR_TARJETA, fg=COLOR_PRIMARIO).pack(anchor="w")
+        self.lbl_res_nombre = tk.Label(self.sec_respuesta, text="", font=(FUENTE_BASE, 16, "bold"),
+                                       bg=COLOR_TARJETA, fg=COLOR_TEXTO)
+        self.lbl_res_nombre.pack(anchor="w", pady=(2, 0))
+        self.lbl_res_desc = tk.Label(self.sec_respuesta, text="", font=(FUENTE_BASE, 10), bg=COLOR_TARJETA,
+                                     fg="#475569", wraplength=760, justify="left")
+        self.lbl_res_desc.pack(anchor="w", pady=(0, 8))
+        self.zona_razones = tk.Frame(self.sec_respuesta, bg=COLOR_TARJETA)
+        self.zona_razones.pack(fill="x")
 
-        self.txt_consultas = tk.Text(
-            card_code, wrap="word", font=("Consolas", 9),
-            relief="flat", bg="#0f172a", fg="#e2e8f0",
-            insertbackground="#ffffff", padx=14, pady=12
-        )
-        sb = ttk.Scrollbar(card_code, command=self.txt_consultas.yview)
-        self.txt_consultas.configure(yscrollcommand=sb.set)
-        self.txt_consultas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
+        # 2) Comparativa de estilos que todavía pueden ser la respuesta
+        self.sec_comp = tk.Frame(cuerpo, bg=COLOR_FONDO)
+        tk.Label(self.sec_comp, text="Comparativa de Estilos Arquitectónicos:", bg=COLOR_FONDO,
+                 font=(FUENTE_BASE, 10, "bold"), fg=COLOR_TEXTO).pack(anchor="w", pady=(0, 6))
+        self.cv_comp = tk.Canvas(self.sec_comp, bg=COLOR_TARJETA, highlightthickness=1,
+                                 highlightbackground=COLOR_BORDE, height=130)
+        self.cv_comp.pack(fill="x")
+        self.cv_comp.bind("<Configure>", lambda _e: self._dibujar_comparacion())
 
-        t = self.txt_consultas
-        t.tag_configure("seccion", font=("Consolas", 10, "bold"), foreground="#38bdf8", spacing1=8, spacing3=4)
-        t.tag_configure("query", font=("Consolas", 9, "bold"), foreground="#34d399", spacing1=2, spacing3=4)
-        t.tag_configure("predicado", font=("Consolas", 9, "bold"), foreground="#a78bfa")
-        t.tag_configure("dato", foreground="#cbd5e1")
+        # 3) Por qué se descartaron las demás
+        self.sec_descartes = tk.Frame(cuerpo, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
+                                      highlightbackground=COLOR_BORDE, padx=18, pady=12)
+        tk.Label(self.sec_descartes, text="POR QUÉ SE DESCARTARON LAS DEMÁS", font=(FUENTE_BASE, 8, "bold"),
+                 bg=COLOR_TARJETA, fg=COLOR_PELIGRO_TEXT).pack(anchor="w", pady=(0, 4))
+        self.zona_descartes = tk.Frame(self.sec_descartes, bg=COLOR_TARJETA)
+        self.zona_descartes.pack(fill="x")
 
-    def _crear_arbol(self, padre, cols, titulos, anchos, alto=4, arbol=False):
-        card = tk.Frame(padre, bg=COLOR_TARJETA, bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE)
-        card.pack(fill="both", expand=True, pady=(2, 8))
-        tv = ttk.Treeview(card, columns=cols, height=alto, show="tree headings" if arbol else "headings")
-        if arbol:
-            tv.column("#0", width=200, anchor="w")
-            tv.heading("#0", text="Nivel", anchor="w")
-        for c, t, a in zip(cols, titulos, anchos):
-            tv.heading(c, text=t, anchor="w")
-            tv.column(c, width=a, anchor="w", stretch=True)
-        sb = ttk.Scrollbar(card, orient="vertical", command=tv.yview)
-        tv.configure(yscrollcommand=sb.set)
-        tv.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        return tv
+    def _linea(self, padre, texto, color):
+        tk.Label(padre, text=texto, font=(FUENTE_BASE, 10), bg=COLOR_TARJETA, fg=color,
+                 wraplength=760, justify="left").pack(anchor="w", padx=(12, 0), pady=1)
 
     # --- Acciones y sincronización ---
     def al_mostrar(self):
@@ -852,40 +805,63 @@ class VistaEvaluacion(ttk.Frame):
             v.set(1 if r in reqs else 0)
         self.texto_libre.set("")
         self.negados = []
+        self.respuestas = []
+        self.pestanas.select(0)
         self.recalcular()
 
     def agregar_dato(self, req):
         if req in self.vars:
             self.vars[req].set(1)
+        self.respuestas.append((req, True))
         self.recalcular()
 
     def negar_dato(self, req):
         if req not in self.negados:
             self.negados.append(req)
+        self.respuestas.append((req, False))
         self.recalcular()
+
+    def deshacer_respuesta(self):
+        if not self.respuestas:
+            return
+        req, aplica = self.respuestas.pop()
+        if aplica and req in self.vars:
+            self.vars[req].set(0)
+        elif not aplica and req in self.negados:
+            self.negados.remove(req)
+        self.recalcular()
+
+    def _sincronizar_respuestas(self, reqs):
+        """Mantiene la lista de respuestas alineada con casillas y negados:
+        una casilla marcada a mano cuenta como "Sí"; una desmarcada se retira."""
+        self.respuestas = [(r, a) for r, a in self.respuestas
+                           if (r in reqs if a else r in self.negados)]
+        respondidos = {r for r, _ in self.respuestas}
+        for r in reqs:
+            if r in self.vars and r not in respondidos:
+                self.respuestas.append((r, True))
 
     def recalcular(self):
         reqs = self.seleccion()
         self.negados = [n for n in self.negados if n not in reqs]
+        self._sincronizar_respuestas(reqs)
 
         try:
             d = self.puente.diagnosticar(reqs)
-            ex = self.puente.explicar(reqs)
             qf = self.puente.que_falta(reqs, self.negados)
             rs = self.puente.resumen(reqs)
+            cands = self.puente.candidatos(reqs)
+            descs = self.puente.descartes(reqs)
         except Exception as error:
             messagebox.showerror("Error en Prolog", f"Ocurrió un error al consultar SWI-Prolog:\n{error}")
             return
 
-        if not d or not ex or not qf or not rs:
+        if not d or not qf or not rs:
             return
 
         self._mostrar_dictamen(d, qf)
-        self._mostrar_pregunta(qf)
-        self._mostrar_resumen(d, ex, qf, rs)
-        self._mostrar_por_que(ex)
-        self._mostrar_que_falta(d, qf)
-        self._mostrar_consultas(d, ex, qf, rs)
+        self._mostrar_preguntas(d, qf)
+        self._mostrar_resumen(d, qf, rs, cands, descs)
 
     def guardar_en_historial(self):
         reqs = self.seleccion()
@@ -948,82 +924,131 @@ class VistaEvaluacion(ttk.Frame):
             text=("Ignorado (no reconocido): " + ", ".join(d["Desconocidos"])) if d["Desconocidos"] else ""
         )
 
-    def _mostrar_pregunta(self, qf):
+    def _mostrar_preguntas(self, d, qf):
+        """Flujo tipo asistente: una pregunta a la vez, tomada de que_falta/6."""
+        lider = self.nombre_estilo(d["Mejor"])
+        if qf["Estado"] == "vacio":
+            lider += " (por defecto)"
+        terminado = not qf["Sugerencias"] or qf["Estado"] == "definitivo"
+
+        if terminado:
+            self.lbl_progreso.configure(
+                text=f"{len(self.respuestas)} respuesta(s) · Estilo líder actual: {lider}")
+        else:
+            self.lbl_progreso.configure(
+                text=f"Pregunta {len(self.respuestas) + 1} · Estilo líder actual: {lider}")
+
         card = self.card_pregunta
         for h in card.winfo_children():
             h.destroy()
 
-        tk.Label(card, text="DESEMPATE / PREGUNTA SUGERIDA",
-                 font=(FUENTE_BASE, 8, "bold"), bg=COLOR_TARJETA, fg=COLOR_AMBAR_TEXT).pack(anchor="w")
+        if terminado:
+            tk.Label(card, text="✔ Evaluación lista", font=(FUENTE_BASE, 14, "bold"),
+                     bg=COLOR_TARJETA, fg=COLOR_EXITO_TEXT).pack(anchor="w")
+            motivo = ("El dictamen es definitivo." if qf["Estado"] == "definitivo"
+                      else "El sistema experto no tiene más preguntas que cambien el dictamen.")
+            tk.Label(card, text=f"{motivo} Recomendación: {lider}.", font=(FUENTE_BASE, 10),
+                     bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED, wraplength=760, justify="left").pack(anchor="w", pady=(4, 0))
+            ttk.Button(card, text="📊 Ver resumen →", style="Primario.TButton",
+                       command=lambda: self.pestanas.select(1)).pack(anchor="w", pady=(12, 0))
+        else:
+            req, poder, preg, efectos = qf["Sugerencias"][0]
+            tk.Label(card, text="PREGUNTA DEL SISTEMA EXPERTO", font=(FUENTE_BASE, 8, "bold"),
+                     bg=COLOR_TARJETA, fg=COLOR_PRIMARIO).pack(anchor="w")
+            tk.Label(card, text=f"¿{con_tildes(preg)}", font=(FUENTE_BASE, 13, "bold"),
+                     bg=COLOR_TARJETA, fg=COLOR_TEXTO, wraplength=760, justify="left").pack(anchor="w", pady=(6, 8))
 
-        if not qf["Sugerencias"]:
-            tk.Label(card, text="✔ Evidencia suficiente", font=(FUENTE_BASE, 10, "bold"),
-                     bg=COLOR_TARJETA, fg=COLOR_EXITO_TEXT).pack(anchor="w", pady=(8, 0))
-            tk.Label(card, text="No hay preguntas pendientes o no existen más reglas discriminantes.",
-                     font=(FUENTE_BASE, 9), bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED, wraplength=340).pack(anchor="w", pady=(2, 0))
-            return
+            tk.Label(card, text=f"IMPACTO SI RESPONDE «SÍ» (Poder: {poder})", font=(FUENTE_BASE, 8, "bold"),
+                     bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(anchor="w")
+            mostrados = 0
+            for est, tipo, delta in efectos:
+                if tipo == "descarta":
+                    ef, col_ef = f"✕ {self.nombre_estilo(est)} se descarta", COLOR_PELIGRO_TEXT
+                elif tipo == "neutro":
+                    continue
+                else:
+                    signo = "+" if delta > 0 else ""
+                    ef = f"{'▲' if delta > 0 else '▼'} {self.nombre_estilo(est)}: {signo}{delta} pts"
+                    col_ef = COLOR_EXITO_TEXT if delta > 0 else COLOR_PELIGRO_TEXT
+                tk.Label(card, text=f"   • {ef}", font=(FUENTE_BASE, 9),
+                         bg=COLOR_TARJETA, fg=col_ef).pack(anchor="w")
+                mostrados += 1
+            if not mostrados:
+                tk.Label(card, text="   • No altera puntajes principales", font=(FUENTE_BASE, 9),
+                         bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(anchor="w")
 
-        req, poder, preg, efectos = qf["Sugerencias"][0]
-        tk.Label(card, text=f"¿{con_tildes(preg)}", font=(FUENTE_BASE, 10, "bold"),
-                 bg=COLOR_TARJETA, fg=COLOR_TEXTO, wraplength=350, justify="left").pack(anchor="w", pady=(6, 3))
+            fila_btn = tk.Frame(card, bg=COLOR_TARJETA)
+            fila_btn.pack(anchor="w", pady=(12, 0))
+            ttk.Button(fila_btn, text="✔ Sí, aplica", style="Primario.TButton",
+                       command=lambda r=req: self.agregar_dato(r)).pack(side="left", padx=(0, 6))
+            ttk.Button(fila_btn, text="✕ No aplica", style="Suave.TButton",
+                       command=lambda r=req: self.negar_dato(r)).pack(side="left")
 
-        ef_txt = []
-        for est, tipo, delta in efectos:
-            if tipo == "descarta":
-                ef_txt.append(f"{self.nombre_estilo(est)} se descarta")
-            elif tipo != "neutro":
-                ef_txt.append(f"{self.nombre_estilo(est)} {'+' if delta > 0 else ''}{delta}")
-        sub = " · ".join(ef_txt) or "No altera puntajes principales"
+        # Respuestas dadas (más reciente arriba)
+        for h in self.zona_respuestas.winfo_children():
+            h.destroy()
+        if not self.respuestas:
+            tk.Label(self.zona_respuestas, text="Aún no hay respuestas.", font=(FUENTE_BASE, 9),
+                     bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(anchor="w")
+        for i, (respondido, aplica) in reversed(list(enumerate(self.respuestas, start=1))):
+            marca, col = ("✔ Sí", COLOR_EXITO_TEXT) if aplica else ("✕ No", COLOR_PELIGRO_TEXT)
+            fila = tk.Frame(self.zona_respuestas, bg=COLOR_TARJETA)
+            fila.pack(fill="x", pady=1)
+            tk.Label(fila, text=f"{i}.", width=3, anchor="w", font=(FUENTE_BASE, 9),
+                     bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(side="left")
+            tk.Label(fila, text=marca, width=5, anchor="w", font=(FUENTE_BASE, 9, "bold"),
+                     bg=COLOR_TARJETA, fg=col).pack(side="left")
+            tk.Label(fila, text=self.etiquetas.get(respondido, respondido), font=(FUENTE_BASE, 9),
+                     bg=COLOR_TARJETA, fg=COLOR_TEXTO).pack(side="left")
+        self.btn_deshacer.state(["!disabled"] if self.respuestas else ["disabled"])
 
-        tk.Label(card, text=f"Impacto: {sub} (Poder: {poder})", font=(FUENTE_BASE, 8),
-                 bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED, wraplength=350, justify="left").pack(anchor="w")
-
-        fila_btn = tk.Frame(card, bg=COLOR_TARJETA)
-        fila_btn.pack(anchor="w", pady=(10, 0))
-
-        ttk.Button(fila_btn, text="✔ Sí, aplica", style="Primario.TButton",
-                   command=lambda: self.agregar_dato(req)).pack(side="left", padx=(0, 4))
-        ttk.Button(fila_btn, text="✕ No aplica", style="Suave.TButton",
-                   command=lambda: self.negar_dato(req)).pack(side="left", padx=4)
-
-    def _mostrar_resumen(self, d, ex, qf, rs):
-        estado = qf["Estado"]
+    def _mostrar_resumen(self, d, qf, rs, cands, descs):
         filas = []
-        for estilo, puntaje, _pr, _ri in d["Ranking"]:
-            rol = "lider" if estilo == d["Mejor"] and estado != "vacio" else ("competencia" if estilo in qf["Competencia"] else "otro")
-            filas.append((estilo, puntaje, rol, ""))
-        for estilo, req in d["Descartados"]:
-            filas.append((estilo, None, "descartado", f"Incompatible con «{self.etiquetas.get(req, req)}»"))
-
+        for estilo, puntaje, _pr, _ri in cands:
+            rol = "lider" if estilo == d["Mejor"] else ("competencia" if estilo in qf["Competencia"] else "otro")
+            filas.append((estilo, puntaje, rol))
         self._filas_comp = filas
-        self._dibujar_comparacion()
 
-        t = self.txt_resumen
-        t.configure(state="normal")
-        t.delete("1.0", "end")
+        for sec in (self.sec_vacio, self.sec_respuesta, self.sec_comp, self.sec_descartes):
+            sec.pack_forget()
 
-        if estado == "vacio":
-            t.insert("end", "Marque requisitos a la izquierda para auditar el razonamiento paso a paso.\n", "gris")
-            t.configure(state="disabled")
+        if qf["Estado"] == "vacio":
+            self.sec_vacio.pack(anchor="w", pady=8)
             return
 
-        t.insert("end", f"Razonamiento a favor de {self.nombre_estilo(rs['Mejor'])}:\n", "h")
+        # 1) Respuesta
+        nom, desc = self.estilos.get(rs["Mejor"], (bonito(rs["Mejor"]), ""))
+        puntaje = next((p for e, p, _, _ in cands if e == rs["Mejor"]), None)
+        sufijo = f"  ·  {puntaje} pts" if puntaje is not None else "  ·  recomendación por defecto"
+        self.lbl_res_nombre.configure(text=f"★ {nom}{sufijo}")
+        self.lbl_res_desc.configure(text=con_tildes(desc))
+
+        for h in self.zona_razones.winfo_children():
+            h.destroy()
+        tk.Label(self.zona_razones, text=f"Razonamiento a favor de {nom}:", font=(FUENTE_BASE, 10, "bold"),
+                 bg=COLOR_TARJETA, fg=COLOR_TEXTO).pack(anchor="w", pady=(4, 4))
         for atributo, peso, reqs in rs["AFavor"]:
             causas = ", ".join(self.etiquetas.get(r, r) for r in reqs)
-            t.insert("end", f"✔ Favorece {bonito(atributo)} (+{peso}) debido a: {causas}\n", "ok")
-
+            self._linea(self.zona_razones, f"✔ Favorece {bonito(atributo)} (+{peso}) debido a: {causas}", COLOR_EXITO_TEXT)
         for req, peso in rs["EnContra"]:
-            t.insert("end", f"✖ Penalizado con -{peso} puntos por: {self.etiquetas.get(req, req)}\n", "mal")
+            self._linea(self.zona_razones, f"✖ Penalizado con -{peso} puntos por: {self.etiquetas.get(req, req)}", COLOR_PELIGRO_TEXT)
+        self.sec_respuesta.pack(fill="x", pady=(0, 12), padx=(0, 4))
 
-        if ex["Descartadas"]:
-            t.insert("end", "\nAlternativas descartadas en el proceso:\n", "h")
-            for estilo, tipo, det, _ in ex["Descartadas"]:
-                if tipo == "exclusion":
-                    t.insert("end", f"✖ {self.nombre_estilo(estilo)}: {con_tildes(det)}\n", "mal")
-                else:
-                    t.insert("end", f"⚠ {self.nombre_estilo(estilo)}: {con_tildes(det)}\n", "aviso")
+        # 2) Comparativa
+        self.sec_comp.pack(fill="x", pady=(0, 12), padx=(0, 4))
+        self._dibujar_comparacion()
 
-        t.configure(state="disabled")
+        # 3) Descartados (solo si hay)
+        for h in self.zona_descartes.winfo_children():
+            h.destroy()
+        for estilo, tipo, motivo in descs:
+            if tipo == "exclusion":
+                txt = f"✖ {self.nombre_estilo(estilo)}: incompatible con «{self.etiquetas.get(motivo, motivo)}»"
+            else:
+                txt = f"✖ {self.nombre_estilo(estilo)}: sin evidencia a favor (puntaje {motivo})"
+            self._linea(self.zona_descartes, txt, COLOR_PELIGRO_TEXT)
+        if descs:
+            self.sec_descartes.pack(fill="x", padx=(0, 4))
 
     def _dibujar_barra_pildora(self, canvas, x1, y1, x2, y2, radio, color):
         """Dibuja una barra con extremos redondeados en el canvas."""
@@ -1048,34 +1073,28 @@ class VistaEvaluacion(ttk.Frame):
         c.delete("all")
         filas = self._filas_comp
         if not filas:
-            c.create_text(16, 24, anchor="w", text="Aún no hay puntuaciones calculadas. Seleccione requisitos a la izquierda.",
+            c.create_text(16, 24, anchor="w", text="Responde las preguntas para ver las opciones",
                           fill=COLOR_TEXTO_MUTED, font=(FUENTE_BASE, 9))
+            c.configure(height=48)
             return
 
         ancho = max(c.winfo_width(), 460)
         x0 = 210
         xmax = ancho - 80
         alto_fila = 28
-        maximo = max([p for _, p, _, _ in filas if p is not None] + [1])
+        maximo = max([p for _, p, _ in filas] + [1])
 
-        for i, (estilo, puntaje, rol, nota) in enumerate(filas):
+        for i, (estilo, puntaje, rol) in enumerate(filas):
             y = 8 + i * alto_fila
             if rol == "lider":
                 ico, col_txt, fnt = "★ ", COLOR_PRIMARIO, (FUENTE_BASE, 9, "bold")
             elif rol == "competencia":
                 ico, col_txt, fnt = "● ", COLOR_AMBAR_TEXT, (FUENTE_BASE, 9, "bold")
-            elif rol == "descartado":
-                ico, col_txt, fnt = "✕ ", COLOR_GRIS, (FUENTE_BASE, 9)
             else:
                 ico, col_txt, fnt = "○ ", COLOR_TEXTO, (FUENTE_BASE, 9)
 
             c.create_text(14, y + 10, anchor="w", text=f"{ico}{self.nombre_estilo(estilo)}",
                           fill=col_txt, font=fnt)
-
-            if puntaje is None:
-                c.create_text(x0, y + 10, anchor="w", text=f"Incompatible: {nota}",
-                              fill=COLOR_PELIGRO, font=(FUENTE_BASE, 9))
-                continue
 
             # Pista de fondo (track)
             self._dibujar_barra_pildora(c, x0, y + 3, xmax, y + 17, 7, COLOR_SUPERFICIE)
@@ -1092,94 +1111,6 @@ class VistaEvaluacion(ttk.Frame):
 
         c.configure(height=len(filas) * alto_fila + 16)
 
-    def _mostrar_por_que(self, ex):
-        self.tv_reglas.delete(*self.tv_reglas.get_children())
-        for nivel in (1, 2, 3):
-            pasos = [p for p in ex["Reglas"] if p[0] == nivel]
-            nodo = self.tv_reglas.insert("", "end", text=f"{NOMBRE_NIVEL[nivel]} ({len(pasos)})", open=True)
-            for _, regla, detalle in pasos:
-                self.tv_reglas.insert(nodo, "end", text="", values=(regla, con_tildes(detalle)))
-
-        self.tv_hechos.delete(*self.tv_hechos.get_children())
-        for r, g, a in ex["Hechos"]:
-            self.tv_hechos.insert("", "end", values=(r, self.etiquetas.get(r, r), NOMBRE_GRUPO.get(g, bonito(g)), bonito(a)))
-
-        self.tv_descartadas.delete(*self.tv_descartadas.get_children())
-        for estilo, tipo, det, comparte in ex["Descartadas"]:
-            motivo = "Condición excluyente (\\+)" if tipo == "exclusion" else "Falta de evidencia crítica"
-            comp_txt = ", ".join(bonito(x) for x in comparte) or "Ninguno"
-            self.tv_descartadas.insert("", "end", tags=(tipo,),
-                                       values=(self.nombre_estilo(estilo), motivo, con_tildes(det), comp_txt))
-
-    def _mostrar_que_falta(self, d, qf):
-        self.lbl_qf_estado.configure(
-            text=f"Estado del Dictamen: {bonito(qf['Estado']).upper()}  ·  Nivel de Confianza: {bonito(qf['Confianza']).upper()}"
-        )
-        puntajes = {e: p for e, p, _, _ in d["Ranking"]}
-        comp_txt = "   vs   ".join(f"{self.nombre_estilo(e)} ({puntajes.get(e, 0)} pts)" for e in qf["Competencia"])
-        self.lbl_competencia.configure(text=f"Hipótesis activas en evaluación: {comp_txt}")
-
-        for h in self.zona_sugerencias.winfo_children():
-            h.destroy()
-
-        if not qf["Sugerencias"]:
-            caja_vacia = tk.Frame(self.zona_sugerencias, bg=COLOR_TARJETA, bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE, padx=16, pady=16)
-            caja_vacia.pack(fill="x", pady=6)
-            tk.Label(caja_vacia, text="✔ No hay preguntas de desempate adicionales.", font=(FUENTE_BASE, 10, "bold"),
-                     bg=COLOR_TARJETA, fg=COLOR_TEXTO).pack(anchor="w")
-            tk.Label(caja_vacia, text="La base de conocimiento no tiene más reglas discriminantes para los datos actuales.",
-                     font=(FUENTE_BASE, 9), bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(anchor="w", pady=(2, 0))
-            return
-
-        for i, (req, poder, preg, efectos) in enumerate(qf["Sugerencias"], start=1):
-            caja = tk.Frame(self.zona_sugerencias, bg=COLOR_TARJETA, bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE, padx=14, pady=10)
-            caja.pack(fill="x", pady=4, padx=(0, 4))
-
-            fila_cab = tk.Frame(caja, bg=COLOR_TARJETA)
-            fila_cab.pack(fill="x", pady=(0, 4))
-
-            tk.Label(fila_cab, text=f"{i}. ¿{con_tildes(preg)}", font=(FUENTE_BASE, 10, "bold"),
-                     bg=COLOR_TARJETA, fg=COLOR_TEXTO, wraplength=520, justify="left").pack(side="left")
-
-            tk.Label(fila_cab, text=f"Poder: {poder}", font=(FUENTE_BASE, 8, "bold"),
-                     bg=COLOR_INFO_BG, fg=COLOR_PRIMARIO, padx=8, pady=2).pack(side="right")
-
-            tk.Label(caja, text=f"Requisito clave: {req}", font=(FUENTE_BASE, 8),
-                     bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(anchor="w", pady=(0, 4))
-
-            for est, tipo, delta in efectos:
-                if tipo == "descarta":
-                    ef = f"✕ {self.nombre_estilo(est)} se descarta"
-                    col_ef = COLOR_PELIGRO_TEXT
-                else:
-                    signo = "+" if delta > 0 else ""
-                    ef = f"✔ {self.nombre_estilo(est)}: {signo}{delta} pts"
-                    col_ef = COLOR_EXITO_TEXT if delta > 0 else COLOR_PELIGRO_TEXT
-                tk.Label(caja, text=f"   • {ef}", font=(FUENTE_BASE, 9),
-                         bg=COLOR_TARJETA, fg=col_ef).pack(anchor="w")
-
-            fila_b = tk.Frame(caja, bg=COLOR_TARJETA)
-            fila_b.pack(anchor="e", pady=(6, 0))
-            ttk.Button(fila_b, text="✔ Sí, aplica", style="Primario.TButton",
-                       command=lambda r=req: self.agregar_dato(r)).pack(side="left", padx=3)
-            ttk.Button(fila_b, text="✕ No aplica", style="Suave.TButton",
-                       command=lambda r=req: self.negar_dato(r)).pack(side="left", padx=3)
-
-    def _mostrar_consultas(self, d, ex, qf, rs):
-        t = self.txt_consultas
-        t.configure(state="normal")
-        t.delete("1.0", "end")
-        t.insert("end", "=== METAS PROLOG ENVIADAS (PYSWIP) ===\n\n", "seccion")
-        for k in ("diagnostico", "explicacion", "recomendacion", "resumen"):
-            t.insert("end", f"?- {self.puente.ultimas_metas.get(k, '')}.\n\n", "query")
-        t.insert("end", "=== RESPUESTA SIMBÓLICA RECIBIDA ===\n\n", "seccion")
-        for k, v in (("diagnosticar_arquitectura/9", d),
-                     ("explicar_diagnostico/5", ex),
-                     ("que_falta/6", qf),
-                     ("resumen_dictamen/5", rs)):
-            t.insert("end", f"{k}:\n", "predicado")
-            t.insert("end", f"{pprint.pformat(v, width=100)}\n\n", "dato")
-        t.configure(state="disabled")
 
 
 # ---------------------------------------------------------------------------

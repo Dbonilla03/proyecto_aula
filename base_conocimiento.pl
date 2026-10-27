@@ -371,6 +371,45 @@ mejor_estilo(Reqs, Estilo, Prioridad) :-
     Puntaje > 0, !.
 mejor_estilo(_, monolito_modular, por_defecto).
 
+/* candidatos(+Reqs, -Lista): estilos que todavia pueden ser la respuesta.
+   Toma el ranking/2 (que ya solo contiene estilos viables) y conserva las
+   filas con puntaje positivo, en el mismo orden y con la misma forma
+   [Estilo, Puntaje, Prioridad, Riesgo]. Pasa por preparar_requisitos/2
+   como los demas predicados que llama Python. Lista vacia -> []. */
+candidatos(Reqs, Lista) :-
+    preparar_requisitos(Reqs, V),
+    ranking(V, Ranking),
+    findall([E, P, Pr, Ri],
+            ( member([E, P, Pr, Ri], Ranking), P > 0 ),
+            Lista).
+
+/* descartes(+Reqs, -Lista): complemento de candidatos/2. Devuelve
+   [[Estilo, Tipo, Motivo], ...] para cada estilo que NO es candidato, asi
+   candidatos + descartes cubren todos los estilos sin repetir ninguno.
+   NEGACION POR FALLO: estilo/2 instancia E antes de \+, y memberchk/2
+   compara con la fila [E, ...] ya ligada. Lista vacia -> todos los estilos
+   salen como sin_evidencia con puntaje 0. */
+descartes(Reqs, Lista) :-
+    preparar_requisitos(Reqs, V),
+    candidatos(V, Cands),
+    findall([E, Tipo, Motivo],
+            ( estilo(E, _),
+              \+ memberchk([E|_], Cands),
+              motivo_no_candidato(E, V, Tipo, Motivo) ),
+            Lista).
+
+/* motivo_no_candidato(+Estilo, +Reqs, -Tipo, -Motivo):
+   1) exclusion: el estilo choca con un requisito (motivo_descarte/3). El
+      corte deja un solo motivo aunque varios requisitos lo excluyan, para
+      que el estilo aparezca una sola vez, e impide caer en la 2a clausula.
+   2) sin_evidencia: el estilo es viable pero su puntaje es <= 0 (si fuera
+      positivo estaria en candidatos/2). Motivo = puntaje. */
+motivo_no_candidato(E, V, exclusion, R) :-
+    motivo_descarte(E, V, R), !.
+motivo_no_candidato(E, V, sin_evidencia, P) :-
+    estilo_viable(E, V),
+    puntaje(E, V, P).
+
 /* descartados(+Reqs, -Lista): [[Estilo, RequisitoQueLoDescarta], ...] */
 descartados(Reqs, Lista) :-
     setof([E, M],
