@@ -1,6 +1,6 @@
 # ArquiSelect — Entregable 2
 
-Sistema experto de **caja blanca** que recomienda un estilo de arquitectura de software (monolito en capas, monolito modular, microservicios, serverless u orientada a eventos). Explica paso a paso por qué llegó al dictamen y, cuando la evidencia no alcanza, sugiere qué dato preguntar para desempatar.
+Sistema experto de **caja blanca** que recomienda un estilo de arquitectura de software entre 11 estilos (monolito en capas, monolito modular, microservicios, serverless, orientada a eventos, MVC, Onion, Hexagonal, SOA, Cliente-Servidor y Clean Architecture). Además, el usuario puede enseñarle estilos nuevos desde la interfaz sin reiniciar. Explica paso a paso por qué llegó al dictamen y, cuando la evidencia no alcanza, sugiere qué dato preguntar para desempatar.
 
 - **Capa simbólica (Prolog):** `base_conocimiento.pl`. Aquí está toda la inferencia, la traza de auditoría y el cálculo del desempate.
 - **Capa imperativa (Python):** `main.py`. Contiene la aplicación de escritorio en Tkinter y el controlador PySwip. Solo captura y limpia las entradas, consulta y muestra.
@@ -11,7 +11,9 @@ Sistema experto de **caja blanca** que recomienda un estilo de arquitectura de s
 |---|---|
 | `main.py` | Aplicación de escritorio multi-vista (Tkinter), persistencia de evaluaciones en JSON (`GestorHistorial`) y clase `PuenteProlog`, que hace todas las consultas a SWI-Prolog. |
 | `base_conocimiento.pl` | Hechos y reglas del Entregable 1, más las secciones 5 (explicabilidad), 6 (recomendación) y 7 (apoyo a la interfaz). |
-| `motor.py` | Versión por consola del Entregable 1. Sigue funcionando igual. |
+| `motor.py` | Versión por consola del Entregable 1. Sigue funcionando igual (también carga lo aprendido). |
+| `pruebas.py` | Pruebas automáticas (`python pruebas.py`). Regenera `evidencia_pruebas.txt`. |
+| `conocimiento_aprendido.pl` | Estilos enseñados desde la app. Lo escribe y lo lee Prolog (`guardar_aprendizaje/0`, `cargar_aprendizaje/1`); se crea al guardar el primero. |
 | `historial_evaluaciones.json` | Registro de consultas anteriores guardadas en disco. |
 | `DICCIONARIO_PREDICADOS.md` / `.pdf` | Documentación de los predicados nuevos. |
 
@@ -49,12 +51,13 @@ Se abre la ventana de ArquiSelect.
 
 - **Vista Inicio:** Menú principal con accesos rápidos a *Nueva Evaluación de Arquitectura*, *Historial de Evaluaciones* y *Recargar Base de Conocimiento*.
 - **Vista Evaluación:**
-  - **Panel izquierdo:** casillas de requisitos agrupadas por categoría (salen dinámicamente de `requisitos_disponibles/1`), botones de ejemplos rápidos (*Startup*, *Alta Demanda*, *Empresarial*), campo de texto libre con limpieza automática, y botón para guardar en historial.
+  - **Panel izquierdo:** casillas de requisitos agrupadas por categoría (salen dinámicamente de `requisitos_disponibles/1`), botones de ejemplos rápidos (*Startup*, *Alta Demanda*, *Empresarial*), bloque **Otros requisitos** con el botón *Crear arquitectura nueva…*, y botón para guardar en historial.
   - **Tarjetas superiores:** estilo arquitectónico recomendado, descripción detallada, chips de prioridad (severidad), riesgo y confianza, junto con la tarjeta interactiva de desempate (*¿Qué falta?*).
   - **Pestaña "Resumen & Ranking":** gráfico comparativo de barras con las puntuaciones de cada estilo y explicación clara en lenguaje natural (atributos a favor, penalizaciones y alternativas descartadas).
   - **Pestaña "¿Por qué?":** traza exacta de inferencia devuelta por Prolog (reglas disparadas por nivel en árbol, hechos comprobados y alternativas descartadas).
   - **Pestaña "¿Qué falta?":** estado del dictamen, hipótesis en competencia y listado completo de preguntas con poder de desempate calculado por Prolog.
   - **Pestaña "Consulta a Prolog":** metas exactas enviadas y respuesta cruda en formato Prolog para auditoría técnica.
+- **Vista Crear arquitectura nueva:** nombre, descripción corta y la lista de requisitos con las columnas *Favorece* (con peso 1-3) e *Incompatible*. Prolog valida y guarda; el estilo nuevo compite de inmediato en el dictamen, la comparativa y las preguntas guiadas. Abajo se listan las arquitecturas aprendidas con su botón 🗑. *Volver a la evaluación* conserva lo que ya estaba marcado y respondido.
 - **Vista Historial:** Tabla con las evaluaciones generadas, fecha, requisitos ingresados, estilo dictaminado, prioridad y estado, persistido en `historial_evaluaciones.json`.
 
 ## Decisiones técnicas

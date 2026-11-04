@@ -22,6 +22,9 @@ class MotorInferencia:
     def __init__(self, ruta=RUTA_BASE):
         self.prolog = Prolog()
         self.prolog.consult(ruta.replace("\\", "/"))
+        # Mismo conocimiento que la app: tambien los estilos aprendidos
+        # (Prolog decide la ruta y tolera que el archivo falte o este danado).
+        self.consultar("ruta_aprendizaje(R), cargar_aprendizaje(R)")
 
     def consultar(self, meta):
         """Ejecuta una meta Prolog completa y devuelve la lista de soluciones.

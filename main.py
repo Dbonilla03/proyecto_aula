@@ -19,11 +19,11 @@ import os
 import re
 import sys
 import json
-import unicodedata
 from datetime import datetime
 
 import tkinter as tk
 from tkinter import ttk, messagebox
+from tkinter import font as tkfont
 
 # ===========================================================================
 # 1. CONSTANTES, RUTAS Y PALETA MINIMALISTA CONTEMPORÁNEA
@@ -126,7 +126,13 @@ TILDES_COMUNES = {
     "modulos": "módulos", "unico": "único", "pequenos": "pequeños", "version": "versión",
     "caidas": "caídas", "trabajaran": "trabajarán", "util": "útil", "ningun": "ningún",
     "negacion": "negación", "penalizacion": "penalización", "critica": "crítica",
-    "condicion": "condición", "alfabetico": "alfabético", "esta": "está"
+    "condicion": "condición", "alfabetico": "alfabético", "esta": "está",
+    # textos de los estilos y requisitos agregados y del aprendizaje
+    "logica": "lógica", "automatica": "automática", "automaticas": "automáticas",
+    "anos": "años", "vivira": "vivirá", "debera": "deberá", "pequenas": "pequeñas",
+    "concentricas": "concéntricas", "facil": "fácil", "nucleo": "núcleo",
+    "maxima": "máxima", "tecnologica": "tecnológica", "codigo": "código", "faciles": "fáciles",
+    "mas": "más", "numero": "número", "tendera": "tenderá",
 }
 _PATRON_TILDES = re.compile(r"\b(" + "|".join(TILDES_COMUNES) + r")\b", re.IGNORECASE)
 
@@ -144,26 +150,23 @@ def bonito(texto: str) -> str:
 
 
 # ===========================================================================
-# 2. LIMPIEZA DE ENTRADAS (Responsabilidad estricta de Python)
+# 2. FORMATO DE DATOS HACIA PROLOG (Python solo empaqueta; Prolog valida)
 # ===========================================================================
-def limpiar_requisito(texto):
-    sin_tildes = unicodedata.normalize("NFKD", str(texto))
-    sin_tildes = "".join(c for c in sin_tildes if not unicodedata.combining(c))
-    return re.sub(r"[^a-z0-9]+", "_", sin_tildes.lower()).strip("_")
-
-
-def limpiar_texto_libre(texto):
-    partes = [limpiar_requisito(p) for p in str(texto).split(",")]
-    return [p for p in partes if p]
-
-
 def atomo(texto):
-    s = str(texto).replace("\\", "\\\\").replace("'", "\\'")
+    """Texto como átomo Prolog entre comillas simples (nunca variable libre).
+    Se escapan barra, comilla y saltos de línea para que la consulta sea válida."""
+    s = (str(texto).replace("\\", "\\\\").replace("'", "\\'")
+         .replace("\n", "\\n").replace("\r", ""))
     return f"'{s}'"
 
 
 def lista_prolog(elementos):
     return "[" + ",".join(atomo(e) for e in elementos) + "]"
+
+
+def lista_pares_prolog(pares):
+    """[(requisito, peso), ...] -> "[['req',2],...]" (formato de ensenar_estilo/6)."""
+    return "[" + ",".join(f"[{atomo(r)},{int(p)}]" for r, p in pares) + "]"
 
 
 def a_python(valor):
@@ -173,6 +176,11 @@ def a_python(valor):
         return [a_python(v) for v in valor]
     if isinstance(valor, (int, float, str)):
         return valor
+    if type(valor).__name__ == "Variable":
+        # Variable que quedó sin ligar (p. ej. la plantilla de un findall).
+        # Leer su .value con la consulta ya cerrada usa un term_t inválido y
+        # SWI-Prolog aborta el proceso, así que se devuelve None sin tocarla.
+        return None
     interno = getattr(valor, "value", None)
     if isinstance(interno, (str, bytes)):
         return a_python(interno)
@@ -190,10 +198,21 @@ class PuenteProlog:
         self.ruta = ruta.replace("\\", "/")
         self.prolog = Prolog()
         self.ultimas_metas = {}
+        self.estado_aprendizaje = ("sin_archivo", 0)
         self.recargar()
 
     def recargar(self):
+        """Consulta (o reconsulta) la base y vuelve a leer lo aprendido.
+        Reconsultar el .pl no garantiza borrar lo agregado con assertz, por eso
+        Prolog olvida primero lo aprendido y luego lo carga desde
+        conocimiento_aprendido.pl. catch/3: la primera vez el predicado aún no existe."""
+        self.consultar("catch(olvidar_aprendizaje, _, true)")
         self.prolog.consult(self.ruta)
+        r = self.una_solucion(
+            "aprendizaje",
+            "ruta_aprendizaje(Ruta), cargar_aprendizaje(Ruta, Estado), "
+            "estado_carga(Estado, Tipo, Detalle)")
+        self.estado_aprendizaje = (r["Tipo"], r["Detalle"]) if r else ("sin_archivo", 0)
 
     def consultar(self, meta):
         soluciones = list(self.prolog.query(meta))
@@ -201,7 +220,7 @@ class PuenteProlog:
 
     def una_solucion(self, nombre, meta):
         self.ultimas_metas[nombre] = meta
-        soluciones = self.consultar(f"once({meta})")
+        soluciones = self.consultar(f"once(({meta}))")
         return soluciones[0] if soluciones else None
 
     def _lista(self, nombre, meta):
@@ -241,6 +260,32 @@ class PuenteProlog:
                 "Mejor, AFavor, EnContra, SinEfecto)")
         return self.una_solucion("resumen", meta)
 
+    # --- Aprendizaje en caliente (sección 8 de la base) ---
+    def ensenar_estilo(self, nombre, descripcion, favorece, incompatibles):
+        """Envía lo marcado a ensenar_estilo/6. Prolog valida y responde; aquí
+        solo se devuelve {tipo: ok|error, id, mensaje, advertencias}."""
+        meta = (f"ensenar_estilo({atomo(nombre)}, {atomo(descripcion)}, "
+                f"{lista_pares_prolog(favorece)}, {lista_prolog(incompatibles)}, "
+                "Resultado, Advertencias), "
+                "tipo_resultado(Resultado, Tipo, Id), mensaje_resultado(Resultado, Mensaje)")
+        r = self.una_solucion("ensenar", meta)
+        if not r:
+            return {"tipo": "error", "id": "", "advertencias": [],
+                    "mensaje": "Prolog no respondio a ensenar_estilo/6."}
+        return {"tipo": r["Tipo"], "id": r["Id"], "mensaje": r["Mensaje"],
+                "advertencias": r["Advertencias"]}
+
+    def olvidar_estilo(self, id_estilo):
+        """True si Prolog lo borró (solo borra estilos aprendidos)."""
+        return self.una_solucion("olvidar", f"olvidar_estilo({atomo(id_estilo)})") is not None
+
+    def guardar_aprendizaje(self):
+        if self.una_solucion("guardar", "guardar_aprendizaje") is None:
+            raise RuntimeError("guardar_aprendizaje/0 fallo")
+
+    def estilos_aprendidos(self):
+        return [(i, n) for i, n in self._lista("aprendidos", "estilos_aprendidos(Lista)")]
+
 
 # ===========================================================================
 # 4. GESTOR DE HISTORIAL (Persistencia JSON en disco)
@@ -262,13 +307,14 @@ class GestorHistorial:
     def cargar(self):
         return list(reversed(self._leer()))
 
-    def guardar_evaluacion(self, requisitos, estilo, prioridad, estado):
+    def guardar_evaluacion(self, requisitos, estilo, prioridad, estado, estilo_id=None):
         consultas = self._leer()
 
         nuevo_registro = {
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "requisitos": requisitos,
             "estilo": estilo,
+            "estilo_id": estilo_id,
             "prioridad": prioridad,
             "estado": estado,
         }
@@ -309,6 +355,15 @@ def construir_encabezado(padre, titulo, subtitulo, accion_derecha=None, texto_ac
     divisor = tk.Frame(padre, bg="#1e293b", height=1)
     divisor.pack(fill="x")
     return marco
+
+
+def recortar_texto(fuente, texto, limite):
+    """Recorta texto con "…" para que mida a lo sumo `limite` píxeles."""
+    if fuente.measure(texto) <= limite:
+        return texto
+    while texto and fuente.measure(texto + "…") > limite:
+        texto = texto[:-1]
+    return texto.rstrip() + "…"
 
 
 class Tooltip:
@@ -622,29 +677,22 @@ class VistaEvaluacion(ttk.Frame):
                 chk.pack(anchor="w", pady=2)
                 Tooltip(chk, "¿" + con_tildes(r["pregunta"]))
 
-        # 3. Texto libre y controles inferiores
-        card_txt = tk.Frame(col, bg=COLOR_TARJETA, bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE, padx=12, pady=10)
-        card_txt.pack(fill="x", pady=(8, 0))
+        # 3. Otros requisitos: enseñar una arquitectura nueva (VistaNuevaArquitectura)
+        card_otros = tk.Frame(col, bg=COLOR_TARJETA, bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE, padx=12, pady=10)
+        card_otros.pack(fill="x", pady=(8, 0))
 
         tk.Label(
-            card_txt, text="OTROS REQUISITOS (TEXTO LIBRE)",
+            card_otros, text="OTROS REQUISITOS",
             font=(FUENTE_BASE, 8, "bold"), bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED
         ).pack(anchor="w", pady=(0, 6))
 
-        fila_txt = tk.Frame(card_txt, bg=COLOR_TARJETA)
-        fila_txt.pack(fill="x")
-        self.texto_libre = tk.StringVar()
-        ent = ttk.Entry(fila_txt, textvariable=self.texto_libre, font=(FUENTE_BASE, 9))
-        ent.pack(side="left", fill="x", expand=True)
-        ent.bind("<Return>", lambda _e: self.recalcular())
-
-        ttk.Button(fila_txt, text="Añadir", style="Secundario.TButton", command=self.recalcular).pack(side="left", padx=(6, 0))
-
-        self.lbl_desconocidos = tk.Label(
-            card_txt, text="", font=(FUENTE_BASE, 8),
-            bg=COLOR_TARJETA, fg=COLOR_AMBAR, wraplength=320, justify="left"
+        btn_nueva = ttk.Button(
+            card_otros, text="➕ Crear arquitectura nueva…", style="Secundario.TButton",
+            command=lambda: controlador.mostrar_vista("VistaNuevaArquitectura")
         )
-        self.lbl_desconocidos.pack(anchor="w", pady=(4, 0))
+        btn_nueva.pack(fill="x")
+        Tooltip(btn_nueva, "Enseñe al sistema un estilo que no conoce eligiendo los requisitos "
+                           "que favorece. Se agrega a la base sin reiniciar.")
 
         # Botones de acción inferiores
         fila_acciones = ttk.Frame(col, style="Fondo.TFrame")
@@ -790,12 +838,18 @@ class VistaEvaluacion(ttk.Frame):
 
     # --- Acciones y sincronización ---
     def al_mostrar(self):
+        # Al volver de otra vista se conservan casillas, negados y respuestas;
+        # solo se releen los estilos (pudieron cambiar) y se recalcula.
+        self.refrescar_conocimiento()
+
+    def refrescar_conocimiento(self):
+        """Relee de Prolog lo que cambia con el aprendizaje en caliente (estilos y
+        descripciones) y recalcula dictamen, ranking, comparativa y preguntas."""
+        self.estilos = self.puente.estilos()
         self.recalcular()
 
     def seleccion(self):
-        elegidos = [r for r, v in self.vars.items() if v.get() == 1]
-        elegidos += limpiar_texto_libre(self.texto_libre.get())
-        return list(dict.fromkeys(elegidos))
+        return [r for r, v in self.vars.items() if v.get() == 1]
 
     def limpiar(self):
         self.cargar_ejemplo(())
@@ -803,7 +857,6 @@ class VistaEvaluacion(ttk.Frame):
     def cargar_ejemplo(self, reqs):
         for r, v in self.vars.items():
             v.set(1 if r in reqs else 0)
-        self.texto_libre.set("")
         self.negados = []
         self.respuestas = []
         self.pestanas.select(0)
@@ -881,7 +934,8 @@ class VistaEvaluacion(ttk.Frame):
             reqs_legibles,
             estilo_nom,
             bonito(d["Prioridad"]),
-            bonito(qf["Estado"])
+            bonito(qf["Estado"]),
+            estilo_id=d["Mejor"],
         )
         messagebox.showinfo("Historial", "Evaluación guardada exitosamente en el historial.")
 
@@ -919,10 +973,6 @@ class VistaEvaluacion(ttk.Frame):
             (COLOR_SUPERFICIE, COLOR_TEXTO, estado)
         )
         self.lbl_estado.configure(text=msg_est, bg=bg_est, fg=fg_est)
-
-        self.lbl_desconocidos.configure(
-            text=("Ignorado (no reconocido): " + ", ".join(d["Desconocidos"])) if d["Desconocidos"] else ""
-        )
 
     def _mostrar_preguntas(self, d, qf):
         """Flujo tipo asistente: una pregunta a la vez, tomada de que_falta/6."""
@@ -1029,7 +1079,7 @@ class VistaEvaluacion(ttk.Frame):
                  bg=COLOR_TARJETA, fg=COLOR_TEXTO).pack(anchor="w", pady=(4, 4))
         for atributo, peso, reqs in rs["AFavor"]:
             causas = ", ".join(self.etiquetas.get(r, r) for r in reqs)
-            self._linea(self.zona_razones, f"✔ Favorece {bonito(atributo)} (+{peso}) debido a: {causas}", COLOR_EXITO_TEXT)
+            self._linea(self.zona_razones, f"✔ Favorece {con_tildes(bonito(atributo))} (+{peso}) debido a: {causas}", COLOR_EXITO_TEXT)
         for req, peso in rs["EnContra"]:
             self._linea(self.zona_razones, f"✖ Penalizado con -{peso} puntos por: {self.etiquetas.get(req, req)}", COLOR_PELIGRO_TEXT)
         self.sec_respuesta.pack(fill="x", pady=(0, 12), padx=(0, 4))
@@ -1079,8 +1129,17 @@ class VistaEvaluacion(ttk.Frame):
             return
 
         ancho = max(c.winfo_width(), 460)
-        x0 = 210
-        xmax = ancho - 80
+        # La columna de nombres se ajusta al nombre más largo (hay estilos como
+        # "Arquitectura Hexagonal (puertos y adaptadores)" y los aprendidos),
+        # con tope del 45 % del ancho; lo que no cabe se recorta con "…".
+        if not hasattr(self, "_fuente_comp"):
+            self._fuente_comp = tkfont.Font(family=FUENTE_BASE, size=9, weight="bold")
+        fuente = self._fuente_comp
+        textos = [self.nombre_estilo(e) for e, _, _ in filas]
+        ancho_nombres = max(fuente.measure("★ " + t) for t in textos)
+        x0 = min(max(ancho_nombres + 28, 160), int(ancho * 0.45))
+        limite_txt = x0 - 24
+        xmax = max(ancho - 80, x0 + 60)
         alto_fila = 28
         maximo = max([p for _, p, _ in filas] + [1])
 
@@ -1093,8 +1152,8 @@ class VistaEvaluacion(ttk.Frame):
             else:
                 ico, col_txt, fnt = "○ ", COLOR_TEXTO, (FUENTE_BASE, 9)
 
-            c.create_text(14, y + 10, anchor="w", text=f"{ico}{self.nombre_estilo(estilo)}",
-                          fill=col_txt, font=fnt)
+            nombre = recortar_texto(fuente, ico + textos[i], limite_txt)
+            c.create_text(14, y + 10, anchor="w", text=nombre, fill=col_txt, font=fnt)
 
             # Pista de fondo (track)
             self._dibujar_barra_pildora(c, x0, y + 3, xmax, y + 17, 7, COLOR_SUPERFICIE)
@@ -1112,9 +1171,243 @@ class VistaEvaluacion(ttk.Frame):
         c.configure(height=len(filas) * alto_fila + 16)
 
 
+# ---------------------------------------------------------------------------
+# 6.3 VISTA: CREAR ARQUITECTURA NUEVA (aprendizaje en caliente)
+# ---------------------------------------------------------------------------
+class VistaNuevaArquitectura(ttk.Frame):
+    """Formulario para enseñar un estilo nuevo. Python solo reúne lo marcado y
+    lo envía a ensenar_estilo/6; Prolog valida, lo traduce a hechos aporta/3 e
+    incompatible/2 y responde con el mensaje que aquí se muestra."""
+
+    def __init__(self, padre, controlador):
+        super().__init__(padre, style="Fondo.TFrame")
+        self.controlador = controlador
+        self.puente = controlador.puente
+        self.requisitos = self.puente.requisitos_disponibles()
+        self.filas = {}   # requisito -> (var_favorece, var_peso, var_incompatible, combo_peso)
+
+        construir_encabezado(
+            self,
+            "➕ Crear Arquitectura Nueva",
+            "Enseñe al sistema experto un estilo nuevo eligiendo qué requisitos favorece y con cuáles es incompatible",
+            accion_derecha=lambda: controlador.mostrar_vista("VistaEvaluacion"),
+            texto_accion="⬅ Volver a la evaluación"
+        )
+
+        cuerpo = ttk.Frame(self, style="Fondo.TFrame", padding=(18, 12, 18, 12))
+        cuerpo.pack(fill="both", expand=True)
+
+        self._construir_datos(cuerpo)
+        # Lo de abajo se empaqueta desde el fondo para que la lista de
+        # requisitos tome todo el espacio libre del medio.
+        self._construir_aprendidas(cuerpo)
+        self._construir_acciones(cuerpo)
+        self._construir_requisitos(cuerpo)
+        self.refrescar_aprendidas()
+
+    # --- Construcción ---
+    def _tarjeta(self, padre, **kw):
+        return tk.Frame(padre, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
+                        highlightbackground=COLOR_BORDE, **kw)
+
+    def _titulo(self, padre, texto, color=COLOR_TEXTO_MUTED):
+        return tk.Label(padre, text=texto, font=(FUENTE_BASE, 8, "bold"),
+                        bg=COLOR_TARJETA, fg=color)
+
+    def _construir_datos(self, padre):
+        card = self._tarjeta(padre, padx=14, pady=10)
+        card.pack(fill="x", side="top", pady=(0, 8))
+        card.grid_columnconfigure(0, weight=1)
+        card.grid_columnconfigure(1, weight=2)
+
+        self._titulo(card, "NOMBRE DE LA ARQUITECTURA").grid(row=0, column=0, sticky="w")
+        self._titulo(card, "DESCRIPCIÓN CORTA (OPCIONAL)").grid(row=0, column=1, sticky="w", padx=(12, 0))
+        self.var_nombre = tk.StringVar()
+        self.var_desc = tk.StringVar()
+        ttk.Entry(card, textvariable=self.var_nombre, font=(FUENTE_BASE, 10)).grid(
+            row=1, column=0, sticky="ew", pady=(4, 0))
+        ttk.Entry(card, textvariable=self.var_desc, font=(FUENTE_BASE, 10)).grid(
+            row=1, column=1, sticky="ew", padx=(12, 0), pady=(4, 0))
+
+    def _construir_requisitos(self, padre):
+        panel = PanelDesplazable(padre)
+        panel.pack(fill="both", expand=True, side="top")
+
+        grupos = {}
+        for r in self.requisitos:
+            grupos.setdefault(r["grupo"], []).append(r)
+
+        for grupo, items in grupos.items():
+            marco = self._tarjeta(panel.interior, padx=12, pady=8)
+            marco.pack(fill="x", pady=4, padx=(0, 4))
+            # Columnas de ancho fijo junto a la etiqueta; la columna 4 vacía
+            # absorbe el espacio sobrante para que en pantallas anchas las
+            # casillas no queden lejos del requisito.
+            marco.grid_columnconfigure(0, minsize=400)
+            for col, ancho in ((1, 90), (2, 80), (3, 110)):
+                marco.grid_columnconfigure(col, minsize=ancho)
+            marco.grid_columnconfigure(4, weight=1)
+
+            # Cabecera del grupo con los títulos de columna alineados
+            self._titulo(marco, NOMBRE_GRUPO.get(grupo, bonito(grupo)).upper()).grid(
+                row=0, column=0, sticky="w", pady=(0, 4))
+            for col, txt in ((1, "FAVORECE"), (2, "PESO"), (3, "INCOMPATIBLE")):
+                self._titulo(marco, txt).grid(row=0, column=col, pady=(0, 4))
+
+            for fila, r in enumerate(items, start=1):
+                req = r["id"]
+                lbl = tk.Label(marco, text=con_tildes(r["etiqueta"]), font=(FUENTE_BASE, 9),
+                               bg=COLOR_TARJETA, fg=COLOR_TEXTO, anchor="w")
+                lbl.grid(row=fila, column=0, sticky="w", pady=2)
+                if r["pregunta"]:
+                    Tooltip(lbl, "¿" + con_tildes(r["pregunta"]))
+
+                var_fav, var_inc = tk.IntVar(value=0), tk.IntVar(value=0)
+                var_peso = tk.StringVar(value="2")
+                ttk.Checkbutton(marco, variable=var_fav, style="Sintoma.TCheckbutton",
+                                command=lambda q=req: self._al_marcar(q, "favorece")).grid(row=fila, column=1)
+                combo = ttk.Combobox(marco, textvariable=var_peso, values=("1", "2", "3"),
+                                     width=3, state="disabled", font=(FUENTE_BASE, 9))
+                combo.grid(row=fila, column=2)
+                ttk.Checkbutton(marco, variable=var_inc, style="Sintoma.TCheckbutton",
+                                command=lambda q=req: self._al_marcar(q, "incompatible")).grid(row=fila, column=3)
+                self.filas[req] = (var_fav, var_peso, var_inc, combo)
+
+    def _construir_acciones(self, padre):
+        zona = ttk.Frame(padre, style="Fondo.TFrame")
+        zona.pack(fill="x", side="bottom", pady=(8, 0))
+
+        fila = ttk.Frame(zona, style="Fondo.TFrame")
+        fila.pack(fill="x")
+        ttk.Button(fila, text="☑ Seleccionar todo (Favorece)", style="Suave.TButton",
+                   command=self.seleccionar_todo).pack(side="left", padx=(0, 6))
+        ttk.Button(fila, text="✕ Limpiar selección", style="Suave.TButton",
+                   command=self.limpiar_seleccion).pack(side="left")
+        ttk.Button(fila, text="💾 Guardar arquitectura", style="Primario.TButton",
+                   command=self.guardar).pack(side="right")
+
+        self.lbl_mensaje = tk.Label(zona, text="", font=(FUENTE_BASE, 9), anchor="w",
+                                    justify="left", padx=12, pady=6, bg=COLOR_FONDO)
+        self.lbl_mensaje.pack(fill="x", pady=(8, 0))
+        self.lbl_mensaje.bind("<Configure>",
+                              lambda e: self.lbl_mensaje.configure(wraplength=max(e.width - 24, 200)))
+
+    def _construir_aprendidas(self, padre):
+        card = self._tarjeta(padre, padx=14, pady=10)
+        card.pack(fill="x", side="bottom", pady=(8, 0))
+        self._titulo(card, "ARQUITECTURAS APRENDIDAS", COLOR_PRIMARIO).pack(anchor="w", pady=(0, 4))
+
+        panel = PanelDesplazable(card)
+        panel.pack(fill="x")
+        panel.canvas.configure(height=110)
+        for w in (panel, panel.canvas, panel.interior):
+            w.configure(bg=COLOR_TARJETA)
+        self.zona_aprendidas = panel.interior
+
+    # --- Interacción ---
+    def al_mostrar(self):
+        self.refrescar_aprendidas()
+
+    def _al_marcar(self, req, columna):
+        """Favorece e Incompatible son excluyentes en la misma fila; el peso solo
+        se puede elegir si la fila está en Favorece (Prolog lo vuelve a validar)."""
+        var_fav, _peso, var_inc, combo = self.filas[req]
+        if columna == "favorece" and var_fav.get():
+            var_inc.set(0)
+        elif columna == "incompatible" and var_inc.get():
+            var_fav.set(0)
+        combo.configure(state="readonly" if var_fav.get() else "disabled")
+
+    def seleccionar_todo(self):
+        for req, (var_fav, _peso, var_inc, combo) in self.filas.items():
+            var_fav.set(1)
+            var_inc.set(0)
+            combo.configure(state="readonly")
+
+    def limpiar_seleccion(self):
+        for var_fav, var_peso, var_inc, combo in self.filas.values():
+            var_fav.set(0)
+            var_inc.set(0)
+            var_peso.set("2")
+            combo.configure(state="disabled")
+
+    def _mensaje(self, texto, tipo):
+        colores = {
+            "exito": (COLOR_EXITO_BG, COLOR_EXITO_TEXT),
+            "advertencia": (COLOR_AMBAR_BG, COLOR_AMBAR_TEXT),
+            "error": (COLOR_PELIGRO_BG, COLOR_PELIGRO_TEXT),
+        }
+        bg_c, fg_c = colores.get(tipo, (COLOR_FONDO, COLOR_TEXTO))
+        self.lbl_mensaje.configure(text=texto, bg=bg_c, fg=fg_c)
+
+    def guardar(self):
+        favorece = [(req, var_peso.get()) for req, (var_fav, var_peso, _i, _c) in self.filas.items()
+                    if var_fav.get()]
+        incompatibles = [req for req, (_f, _p, var_inc, _c) in self.filas.items() if var_inc.get()]
+        try:
+            res = self.puente.ensenar_estilo(self.var_nombre.get(), self.var_desc.get(),
+                                             favorece, incompatibles)
+        except Exception as error:
+            self._mensaje(f"Error al consultar SWI-Prolog: {error}", "error")
+            return
+
+        if res["tipo"] != "ok":
+            self._mensaje("✖ " + con_tildes(res["mensaje"]), "error")
+            return
+
+        texto = "✔ " + con_tildes(res["mensaje"])
+        try:
+            self.puente.guardar_aprendizaje()
+        except Exception as error:
+            texto += f"\n⚠ Quedó en memoria, pero no se pudo escribir en disco: {error}"
+        for adv in res["advertencias"]:
+            texto += "\n⚠ " + con_tildes(adv)
+        self._mensaje(texto, "advertencia" if res["advertencias"] else "exito")
+
+        self.var_nombre.set("")
+        self.var_desc.set("")
+        self.limpiar_seleccion()
+        self.controlador.conocimiento_actualizado()
+
+    def eliminar(self, id_estilo, nombre):
+        if not messagebox.askyesno(
+                "Confirmar",
+                f"¿Eliminar la arquitectura «{nombre}» ({id_estilo})?\n"
+                "Se borrará de la base de conocimiento y del archivo de aprendizaje."):
+            return
+        if not self.puente.olvidar_estilo(id_estilo):
+            self._mensaje(f"✖ Prolog no eliminó «{nombre}»: no es una arquitectura aprendida.", "error")
+            return
+        try:
+            self.puente.guardar_aprendizaje()
+        except Exception as error:
+            self._mensaje(f"⚠ Se eliminó en memoria, pero no se pudo actualizar el archivo: {error}",
+                          "advertencia")
+        else:
+            self._mensaje(f"✔ Arquitectura «{nombre}» eliminada.", "exito")
+        self.controlador.conocimiento_actualizado()
+
+    def refrescar_aprendidas(self):
+        for h in self.zona_aprendidas.winfo_children():
+            h.destroy()
+        aprendidas = self.puente.estilos_aprendidos()
+        if not aprendidas:
+            tk.Label(self.zona_aprendidas, text="Todavía no hay arquitecturas aprendidas.",
+                     font=(FUENTE_BASE, 9), bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(anchor="w")
+            return
+        for id_estilo, nombre in aprendidas:
+            fila = tk.Frame(self.zona_aprendidas, bg=COLOR_TARJETA)
+            fila.pack(fill="x", pady=1)
+            tk.Label(fila, text=nombre, font=(FUENTE_BASE, 9, "bold"),
+                     bg=COLOR_TARJETA, fg=COLOR_TEXTO).pack(side="left")
+            tk.Label(fila, text=f"  ({id_estilo})", font=(FUENTE_BASE, 9),
+                     bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(side="left")
+            ttk.Button(fila, text="🗑", width=3, style="Peligro.TButton",
+                       command=lambda i=id_estilo, n=nombre: self.eliminar(i, n)).pack(side="right", padx=(0, 4))
+
 
 # ---------------------------------------------------------------------------
-# 6.3 VISTA: HISTORIAL DE EVALUACIONES
+# 6.4 VISTA: HISTORIAL DE EVALUACIONES
 # ---------------------------------------------------------------------------
 class VistaHistorial(ttk.Frame):
     def __init__(self, padre, controlador):
@@ -1199,13 +1492,19 @@ class VistaHistorial(ttk.Frame):
             return
 
         self.lbl_vacio.place_forget()
+        estilos_actuales = self.controlador.puente.estilos()
         for c in consultas:
+            # Si el estilo era aprendido y luego se eliminó, se muestra su id.
+            estilo = c.get("estilo", "")
+            id_estilo = c.get("estilo_id")
+            if id_estilo and id_estilo not in estilos_actuales:
+                estilo = f"{id_estilo} (eliminada)"
             self.tabla.insert(
                 "", "end",
                 values=(
                     c.get("fecha", ""),
                     ", ".join(c.get("requisitos", [])),
-                    c.get("estilo", ""),
+                    estilo,
                     c.get("prioridad", ""),
                     c.get("estado", "")
                 )
@@ -1245,12 +1544,29 @@ class ControladorApp(tk.Tk):
         contenedor.grid_columnconfigure(0, weight=1)
 
         self.vistas = {}
-        for ClaseVista in (VistaInicio, VistaEvaluacion, VistaHistorial):
+        for ClaseVista in (VistaInicio, VistaEvaluacion, VistaNuevaArquitectura, VistaHistorial):
             vista = ClaseVista(contenedor, self)
             self.vistas[ClaseVista.__name__] = vista
             vista.grid(row=0, column=0, sticky="nsew")
 
         self.mostrar_vista("VistaInicio")
+        self.after(400, self._avisar_aprendizaje_danado)
+
+    def _avisar_aprendizaje_danado(self):
+        tipo, detalle = self.puente.estado_aprendizaje
+        if tipo == "danado":
+            messagebox.showwarning(
+                "ArquiSelect",
+                "El archivo conocimiento_aprendido.pl estaba dañado y no se cargó.\n"
+                f"Se guardó una copia en:\n{detalle}\n\n"
+                "La aplicación funciona con la base del experto.")
+
+    def conocimiento_actualizado(self):
+        """Tras enseñar u olvidar un estilo: refresca lo que depende de la base
+        sin reiniciar (estilos, descripciones, comparativa, ranking, dictamen,
+        preguntas guiadas y la lista de aprendidas)."""
+        self.vistas["VistaEvaluacion"].refrescar_conocimiento()
+        self.vistas["VistaNuevaArquitectura"].refrescar_aprendidas()
 
     def _configurar_estilos_ttk(self):
         estilo = ttk.Style(self)
@@ -1355,8 +1671,8 @@ class ControladorApp(tk.Tk):
     def recargar_kb(self):
         try:
             self.puente.recargar()
-            if "VistaEvaluacion" in self.vistas:
-                self.vistas["VistaEvaluacion"].recalcular()
+            self.conocimiento_actualizado()
+            self._avisar_aprendizaje_danado()
             messagebox.showinfo("ArquiSelect", "Base de conocimiento Prolog recargada correctamente.")
         except Exception as error:
             messagebox.showerror("Error al recargar", f"No se pudo recargar la base de conocimiento:\n{error}")

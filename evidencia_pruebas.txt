@@ -1,0 +1,281 @@
+==============================================================================
+EVIDENCIA DE PRUEBAS - ArquiSelect (11 estilos + aprendizaje en caliente)
+Fecha: 2026-11-04 14:25:23   Python 3.13.14   pyswip 0.3.3   SO Windows 11
+SWI-Prolog 100002   Carpeta temporal de persistencia: <carpeta temporal>
+==============================================================================
+
+[A1] Caso 1 de la guia: equipo pequeno + presupuesto bajo + entrega rapida
+   OK     mejor estilo: 'monolito_capas'
+          por que : atributos simplicidad, bajo_costo, rapidez_desarrollo: capas 3+3+3 = 9 (sin cambios)
+   OK     prioridad: 'alta'
+          por que : 9 >= umbral alta 8
+   OK     estado: 'definitivo'
+          por que : margen 9 - 7 = 2 >= umbral_desempate 2
+   OK     ranking (5 primeros): [('monolito_capas', 9), ('monolito_modular', 7), ('mvc', 7), ('cliente_servidor', 6), ('serverless', 6)]
+          por que : CAMBIO: entran mvc 2+2+3 = 7 y cliente_servidor 2+2+2 = 6; empates por orden alfabetico de setof
+   OK     hipotesis en competencia: ['monolito_capas', 'monolito_modular', 'mvc']
+          por que : CAMBIO: max_competidores = 3 y mvc (7) desplaza a serverless (6)
+   OK     primera pregunta sugerida: ['despliegue_independiente', 5]
+          por que : CAMBIO: antes latencia_critica (poder 7) porque descartaba a serverless; ahora serverless ya no compite y latencia solo da capas +2, modular +2, mvc 0 (poder 2). despliegue_independiente: capas descartado (-5), modular -2, mvc 0 -> poder 0 - (-5) = 5
+   OK     microservicios descartado: True
+          por que : incompatible(microservicios, equipo_pequeno)
+
+[A2] Caso 2 de la guia: muchos usuarios + carga variable (empate)
+   OK     ranking (3 primeros): [('serverless', 6), ('microservicios', 5), ('eventos', 4)]
+          por que : serverless 3+3, microservicios 3+2, eventos 2+2 (sin cambios)
+   OK     puntaje soa: 2
+          por que : NUEVO: soa aporta escalabilidad 2
+   OK     estado: 'empate'
+          por que : margen 6 - 5 = 1 < 2
+   OK     competencia: ['serverless', 'microservicios']
+          por que : a menos de 2 puntos del lider
+   OK     primera pregunta: ['equipo_pequeno', 7]
+          por que : serverless +2 (simplicidad), microservicios descartado (-5): poder 7 (sin cambios)
+
+[A3] Caso 2 + responder SI a equipo pequeno
+   OK     mejor: ('serverless', 8)
+          por que : 3+3+2 = 8 (sin cambios)
+   OK     estado: 'definitivo'
+          por que : 8 contra eventos 3
+
+[A4] Evaluacion vacia
+   OK     mejor (fallback): ('monolito_modular', 'por_defecto')
+          por que : mejor_estilo/3 por defecto (sin cambios)
+   OK     estado: 'vacio'
+   OK     descartes sin_evidencia: 11
+          por que : CAMBIO: antes 5; ahora los 11 estilos salen como sin_evidencia con puntaje 0
+
+[A5] Un solo requisito: evidencia insuficiente
+   OK     estado: 'insuficiente'
+          por que : suficiencia/2 con 1 requisito
+   OK     mejor: 'microservicios'
+          por que : empate 3-3 con serverless, gana por orden alfabetico (sin cambios)
+
+[A6] Plantilla alta demanda
+   OK     perfil: 'alta_demanda'
+   OK     mejor: ('microservicios', 6)
+          por que : escalabilidad 3 + disponibilidad 3 (sin cambios)
+   OK     estado: 'definitivo'
+          por que : 6 contra eventos 4
+
+[A7] Plantilla empresarial (equipo grande + dominio complejo)
+   OK     perfil: 'empresarial'
+   OK     ranking (3 primeros): [('clean', 3), ('microservicios', 3), ('monolito_modular', 3)]
+          por que : CAMBIO: los dos requisitos exigen el MISMO atributo (modularidad) y clean tambien lo da con 3; triple empate a 3 que setof ordena alfabeticamente, asi clean queda primero (antes microservicios)
+   OK     mejor: 'clean'
+          por que : CAMBIO: ver fila anterior; no es una ventaja por evidencia
+   OK     estado: 'insuficiente'
+          por que : 3 < umbral media 4 (sin cambios)
+
+[A8] Exclusiones duras: procesos largos + latencia critica
+   OK     serverless excluido: True
+          por que : primer motivo de incompatible/2
+   OK     soa excluido: True
+          por que : NUEVO: incompatible(soa, latencia_critica)
+
+[A9] Entrada sucia: mayusculas, repetidos y requisito desconocido
+   OK     desconocidos: ['xyz']
+          por que : validar_entrada/2 + desconocidos/2
+   OK     mejor: 'monolito_capas'
+          por que : simplicidad: capas 3 contra 2 de los demas
+   OK     suficiencia: 'insuficiente'
+          por que : un solo requisito valido tras quitar repetidos
+
+[A10] candidatos + descartes cubren los 11 estilos sin repetir
+   OK     ['equipo_pequeno', 'presupuesto_bajo', 'entrega_rapida']: (11, True)
+          por que : particion exacta de estilo/2
+   OK     ['muchos_usuarios', 'carga_variable']: (11, True)
+          por que : particion exacta de estilo/2
+   OK     []: (11, True)
+          por que : particion exacta de estilo/2
+   OK     ['procesos_largos', 'latencia_critica']: (11, True)
+          por que : particion exacta de estilo/2
+
+[B1] clean: mantenibilidad + testabilidad + independencia tecnologica + dominio complejo
+   OK     ganador: ('clean', 12)
+          por que : clean 3+3+3+3 = 12; hexagonal 2+3+3+2 = 10; onion 3+3+2+2 = 10
+   OK     segundo: ('hexagonal', 10)
+   OK     estado: 'definitivo'
+          por que : umbral_desempate = 2
+
+[B1b] clean sin dominio complejo: gana pero en empate tecnico
+   OK     ganador: ('clean', 9)
+          por que : clean 3+3+3 = 9; hexagonal 2+3+3 = 8 y onion 3+3+2 = 8 -> margen 1
+   OK     segundo: ('hexagonal', 8)
+   OK     estado: 'empate'
+          por que : umbral_desempate = 2
+
+[B2] onion: mantenibilidad + testabilidad + consistencia estricta
+   OK     ganador: ('onion', 8)
+          por que : onion 3+3+2 = 8; clean 3+3+0 = 6 (clean no aporta consistencia); eventos excluido
+   OK     segundo: ('clean', 6)
+   OK     estado: 'definitivo'
+          por que : umbral_desempate = 2
+
+[B3] hexagonal: testabilidad + independencia tecnologica + mensajes + presupuesto bajo
+   OK     ganador: ('hexagonal', 9)
+          por que : hexagonal 3+3+3 = 9 sin penalizacion; clean 3+3+2 - 1 (presupuesto_bajo) = 7
+   OK     segundo: ('clean', 7)
+   OK     estado: 'definitivo'
+          por que : umbral_desempate = 2
+
+[B4] soa: integrar heredados + mensajes + despliegue independiente
+   OK     ganador: ('soa', 7)
+          por que : soa 3+2+2 = 7; eventos 2+3 = 5; microservicios 2+3 = 5; capas y cliente_servidor excluidos
+   OK     segundo: ('eventos', 5)
+   OK     estado: 'definitivo'
+          por que : umbral_desempate = 2
+
+[B5] cliente_servidor: datos centralizados + consistencia estricta
+   OK     ganador: ('cliente_servidor', 6)
+          por que : cliente_servidor 3+3 = 6; monolito_capas 2+3 = 5
+   OK     segundo: ('monolito_capas', 5)
+   OK     estado: 'empate'
+          por que : umbral_desempate = 2
+   OK     con presupuesto bajo (tal como se pidio): [('cliente_servidor', 5), ('monolito_capas', 5)]
+          por que : LIMITACION de los pesos propuestos: 3+2 = 5 contra 2+3 = 5, gana solo por orden alfabetico
+
+[B6] mvc: separar interfaz y logica + entrega rapida
+   OK     ganador: ('mvc', 6)
+          por que : mvc 3+3 = 6; monolito_capas 2+3 = 5
+   OK     segundo: ('monolito_capas', 5)
+   OK     estado: 'empate'
+          por que : umbral_desempate = 2
+   OK     con alta disponibilidad: (('mvc', 6), 'definitivo')
+          por que : capas 5 - 2 = 3 y modular 4 - 1 = 3 son penalizados; mvc no
+
+[C1] Antes y despues de ensenar_estilo con la misma entrada
+   OK     antes: no aparece: False
+   OK     resultado: 'ok(mi_arquitectura_de_prueba,[])'
+          por que : id derivado del nombre
+   OK     advertencias: []
+          por que : 3 de 20 requisitos (15 %) < 70 %
+   OK     despues: primero del ranking: ('mi_arquitectura_de_prueba', 9)
+          por que : rendimiento 3 + disponibilidad 3 + escalabilidad 3 = 9
+   OK     lider anterior sigue en el ranking: True
+          por que : ('microservicios', 6) no cambia su puntaje
+   OK     aparece en estilos_disponibles: True
+   OK     aparece en candidatos: True
+
+[C2] que_falta recalcula competencia y poder de desempate
+   OK     competencia antes: False
+   OK     competencia despues: 'mi_arquitectura_de_prueba'
+          por que : rendimiento 3 + disponibilidad 3 = 6, lidera
+   OK     las sugerencias cambian: True
+          por que : el estilo nuevo compite y cambia el poder de cada pregunta
+   OK     muchos_usuarios ya no se pregunta con el mismo poder: None
+          por que : ahora la mayoria de competidores suben juntos con escalabilidad; deja el top 3
+   OK     efectos incluyen el estilo nuevo: True
+
+[C3] Requisitos sin atributo se ignoran en Favorece y se informan
+   OK     resultado: 'ok(estilo_con_procesos,[procesos_largos])'
+          por que : procesos_largos no tiene requisito_atributo/2
+   OK     aporta creados: '[simplicidad-3]'
+          por que : solo equipo_pequeno -> simplicidad
+   OK     mensaje lo informa: True
+          por que : Arquitectura "Estilo con procesos" guardada con el identificador estilo_con_procesos. Se ignoraron en Favorece porque no exigen ningun atributo de calidad: Procesos largos (tareas de varios minutos).
+
+[C4] Incompatible se traduce a incompatible/2 y descarta
+   OK     descartado por presupuesto_bajo: True
+          por que : incompatible(estilo_caro, presupuesto_bajo)
+
+[C5] Advertencia de estilo demasiado general (> 70 %)
+   OK     total de requisitos: 20
+          por que : 14 originales + 6 nuevos
+   OK     14 de 20 (70 %): []
+          por que : 70 % no supera el umbral
+   OK     15 de 20 (75 %): 1
+          por que : 75 % > 70 %
+   OK     20 de 20 se guarda igual: True
+          por que : la advertencia no impide guardar
+   OK     texto: True
+          por que : Estilo demasiado general: favorece 20 de 20 requisitos (mas del 70 %), tendera a ganar siempre.
+
+[C6] Nombre con tildes y enie (pyswip en Windows)
+   OK     id ASCII: 'ok(arquitectura_nandu_cafe,[])'
+          por que : minusculas, sin tildes, guion a _
+   OK     nombre conserva tildes: 'Arquitectura Ñandú-Café'
+          por que : ida y vuelta por pyswip sin perdidas
+
+[C7] Dos requisitos con el mismo atributo -> un aporta/3 con el peso mayor
+   OK     aporta: '[modularidad-3]'
+          por que : aporte_total/3 cuenta cada atributo una vez
+
+[D1] Errores de validacion
+   OK     nombre duplicado (aprendido): 'error(nombre_duplicado(mi_arquitectura_de_prueba))'
+          por que : mismo id derivado
+   OK     nombre duplicado (experto): 'error(nombre_duplicado(microservicios))'
+          por que : no se puede pisar un estilo del experto
+   OK     sin requisitos: 'error(sin_requisitos)'
+   OK     mismo requisito en ambas columnas: 'error(requisito_en_ambas(equipo_pequeno))'
+   OK     nombre vacio: 'error(nombre_vacio)'
+   OK     nombre solo simbolos: 'error(nombre_invalido)'
+   OK     peso fuera de rango: 'error(peso_invalido(equipo_pequeno,4))'
+          por que : pesos 1..3
+   OK     requisito desconocido: 'error(requisito_desconocido(volar))'
+   OK     solo requisitos sin atributo: 'error(sin_requisitos_utiles([procesos_largos]))'
+   OK     los errores no agregan estilos: 12
+
+[E1] olvidar_estilo quita el estilo aprendido de todo el razonamiento
+   OK     antes lideraba: 'mi_arquitectura_de_prueba'
+   OK     olvidar_estilo tuvo exito: True
+   OK     ya no esta en el ranking: False
+   OK     no quedan hechos: 0
+   OK     vuelven los 11 estilos: 11
+
+[E2] olvidar_estilo nunca borra un estilo del experto
+   OK     olvidar microservicios falla: False
+          por que : solo pasa la marca estilo_aprendido/1
+   OK     microservicios sigue: True
+   OK     olvidar inexistente falla: False
+
+[E3] olvidar_aprendizaje borra todo lo aprendido
+   OK     con 2 aprendidos: 13
+   OK     despues: 11
+   OK     estilos_aprendidos: []
+
+[F1] guardar_aprendizaje/1 + cargar_aprendizaje/2 (ida y vuelta)
+   OK     se olvido en memoria: False
+   OK     estado de carga: ('cargado', 1)
+   OK     mismos puntajes: {'arquitectura_nandu': 9, 'microservicios': 6, 'eventos': 4, 'monolito_modular': 1, 'clean': 0, 'hexagonal': 0, 'onion': 0, 'mvc': -1, 'monolito_capas': -2, 'cliente_servidor': -4}
+          por que : aporta/3 recuperados
+   OK     descripcion con tildes: 'Prueba con tildes: café'
+   OK     incompatible recuperado: True
+
+[F2] Cargar dos veces y reconsultar la base no duplica hechos
+   OK     estilo/2: 1
+   OK     aporta/3: 3
+   OK     estilos del experto intactos: 12
+          por que : 11 + 1 aprendido
+
+[F3] Archivo inexistente o danado: la base arranca igual
+   OK     sin archivo: ('sin_archivo', 0)
+   OK     danado: 'danado'
+          por que : error de sintaxis atrapado con catch/3
+   OK     respaldo creado: True
+          por que : C:/Users/andre/AppData/Local/Temp/arquiselect_pruebas_5i18t1pn/danado.pl.danado
+   OK     quedan los 11 estilos: 11
+   OK     la inferencia funciona: 'monolito_capas'
+
+[F4] Archivo editado a mano: solo se aceptan hechos validos de estilos aprendidos
+   OK     estado: ('cargado', 1)
+          por que : solo 'bueno'; la directiva y puntaje/3 se ignoran
+   OK     microservicios intacto: 0
+   OK     peso invalido ignorado: '[simplicidad-2]'
+   OK     requisito desconocido ignorado: 0
+
+==============================================================================
+RESULTADO: 120/120 verificaciones correctas, 0 fallas.
+
+TAMANO DE LA BASE (base_conocimiento.pl, sin lo aprendido):
+   hechos (clausulas sin cuerpo) ........ 286  en 59 predicados
+   reglas (clausulas con cuerpo) ........ 165  en 98 predicados
+   predicados distintos ................. 123
+
+CAMBIOS EN LOS ESPERADOS AL PASAR DE 5 A 11 ESTILOS:
+ - A1 (caso 1): mismo dictamen (monolito_capas 9, definitivo). Cambian el ranking (entran mvc 7 y cliente_servidor 6), la competencia (mvc reemplaza a serverless por max_competidores = 3) y la primera pregunta: antes latencia_critica (poder 7), ahora despliegue_independiente (poder 5).
+ - A2/A3/A5/A6: mismo dictamen, mismo estado y misma primera pregunta; solo aparece soa en el ranking con puntajes bajos (escalabilidad 2 / disponibilidad 1).
+ - A4 (vacio): descartes pasa de 5 a 11 estilos sin evidencia.
+ - A7 (empresarial): CAMBIA el estilo recomendado de microservicios a clean. No es por evidencia: equipo_grande y dominio_complejo exigen el mismo atributo (modularidad) y clean, microservicios y monolito_modular lo aportan con 3; setof ordena el triple empate alfabeticamente. El estado sigue siendo 'insuficiente', asi que la interfaz lo presenta como tentativo.
+ - A8: soa tambien aparece descartado por latencia_critica (nuevo incompatible/2).
+ - B5: con los pesos propuestos cliente_servidor solo supera a monolito_capas por centralizacion_datos (3 contra 2), asi que su mejor escenario termina en empate tecnico; con datos_centralizados + presupuesto_bajo empatan 5-5 y gana solo por orden alfabetico. Si se quiere un dictamen definitivo hay que ajustar pesos (p. ej. bajar monolito_capas/centralizacion_datos a 1).

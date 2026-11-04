@@ -4,6 +4,26 @@
 
 :- encoding(utf8).
 
+/* --- 0.1 Predicados dinamicos (aprendizaje en caliente, seccion 8) -------
+        Los hechos de estos predicados pueden crecer en tiempo de ejecucion
+        con assertz/1 cuando el usuario ensena una arquitectura nueva.
+        estilo_aprendido/1 marca lo aprendido para distinguirlo de lo que
+        escribio el experto: solo lo marcado se puede olvidar o guardar. --- */
+:- dynamic estilo/2.
+:- dynamic aporta/3.
+:- dynamic incompatible/2.
+:- dynamic penaliza/3.
+:- dynamic descripcion_estilo/2.
+:- dynamic estilo_aprendido/1.
+
+/* --- 0.2 Carpeta de este archivo: directorio_base(Dir) -------------------
+        Se fija al consultar el .pl para que guardar_aprendizaje/0 escriba
+        conocimiento_aprendido.pl junto a la base, sin depender de Python. */
+:- dynamic directorio_base/1.
+:- prolog_load_context(directory, Dir),
+   retractall(directorio_base(_)),
+   assertz(directorio_base(Dir)).
+
 /* ==========================================================================
    SECCION 1. HECHOS
    ========================================================================== */
@@ -14,6 +34,12 @@ estilo(monolito_modular,  'Monolito modular').
 estilo(microservicios,    'Microservicios').
 estilo(serverless,        'Serverless (funciones como servicio)').
 estilo(eventos,           'Arquitectura orientada a eventos').
+estilo(mvc,               'MVC (Modelo-Vista-Controlador)').
+estilo(onion,             'Arquitectura Onion (cebolla)').
+estilo(hexagonal,         'Arquitectura Hexagonal (puertos y adaptadores)').
+estilo(soa,               'SOA (arquitectura orientada a servicios)').
+estilo(cliente_servidor,  'Cliente-Servidor').
+estilo(clean,             'Clean Architecture').
 
 /* --- 1.2 Requisitos reconocidos: requisito_categoria(Requisito, Categoria)
         Sirven para validar la lista que llega desde Python. -------------- */
@@ -31,6 +57,12 @@ requisito_categoria(despliegue_independiente, operacion).
 requisito_categoria(dominio_complejo,        dominio).
 requisito_categoria(integracion_asincrona,   dominio).
 requisito_categoria(consistencia_estricta,   dominio).
+requisito_categoria(mantenibilidad_largo_plazo,     dominio).
+requisito_categoria(testabilidad_alta,              dominio).
+requisito_categoria(independencia_tecnologica,      dominio).
+requisito_categoria(separar_interfaz_logica,        dominio).
+requisito_categoria(integracion_sistemas_heredados, operacion).
+requisito_categoria(datos_centralizados,            operacion).
 
 /* --- 1.3 Requisito -> atributo de calidad que exige ---------------------
         requisito_atributo(Requisito, Atributo) --------------------------- */
@@ -47,14 +79,27 @@ requisito_atributo(equipo_grande,           modularidad).
 requisito_atributo(dominio_complejo,        modularidad).
 requisito_atributo(integracion_asincrona,   desacople).
 requisito_atributo(consistencia_estricta,   consistencia).
+requisito_atributo(mantenibilidad_largo_plazo,     mantenibilidad).
+requisito_atributo(testabilidad_alta,              testabilidad).
+requisito_atributo(independencia_tecnologica,      independencia_tecnologica).
+requisito_atributo(integracion_sistemas_heredados, interoperabilidad).
+requisito_atributo(separar_interfaz_logica,        separacion_responsabilidades).
+requisito_atributo(datos_centralizados,            centralizacion_datos).
 
 /* --- 1.4 Aporte de cada estilo a un atributo (peso 1..3) ----------------
-        aporta(Estilo, Atributo, Peso) ------------------------------------ */
+        aporta(Estilo, Atributo, Peso)
+        Los pesos de los 6 estilos nuevos (mvc ... clean) y los que se
+        agregaron a los estilos originales por los atributos nuevos
+        (marcados con "% nuevo") son VALORES INICIALES PROPUESTOS: salen
+        de la literatura general de cada estilo y se pueden ajustar con el
+        experto sin tocar ninguna regla. -------------------------------- */
 aporta(monolito_capas,   simplicidad,         3).
 aporta(monolito_capas,   bajo_costo,          3).
 aporta(monolito_capas,   rapidez_desarrollo,  3).
 aporta(monolito_capas,   consistencia,        3).
 aporta(monolito_capas,   rendimiento,         2).
+aporta(monolito_capas,   separacion_responsabilidades, 2).   % nuevo
+aporta(monolito_capas,   centralizacion_datos,         2).   % nuevo
 
 aporta(monolito_modular, modularidad,         3).
 aporta(monolito_modular, bajo_costo,          3).
@@ -62,12 +107,16 @@ aporta(monolito_modular, consistencia,        3).
 aporta(monolito_modular, simplicidad,         2).
 aporta(monolito_modular, rapidez_desarrollo,  2).
 aporta(monolito_modular, rendimiento,         2).
+aporta(monolito_modular, mantenibilidad,      2).            % nuevo
+aporta(monolito_modular, separacion_responsabilidades, 2).   % nuevo
 
 aporta(microservicios,   escalabilidad,             3).
 aporta(microservicios,   disponibilidad,            3).
 aporta(microservicios,   modularidad,               3).
 aporta(microservicios,   independencia_despliegue,  3).
 aporta(microservicios,   elasticidad,               2).
+aporta(microservicios,   independencia_tecnologica, 2).      % nuevo
+aporta(microservicios,   interoperabilidad,         2).      % nuevo
 
 aporta(serverless,       elasticidad,         3).
 aporta(serverless,       escalabilidad,       3).
@@ -80,6 +129,44 @@ aporta(eventos,          escalabilidad,       2).
 aporta(eventos,          disponibilidad,      2).
 aporta(eventos,          elasticidad,         2).
 aporta(eventos,          modularidad,         1).
+aporta(eventos,          interoperabilidad,   2).            % nuevo
+
+aporta(mvc,              separacion_responsabilidades, 3).
+aporta(mvc,              rapidez_desarrollo,  3).
+aporta(mvc,              simplicidad,         2).
+aporta(mvc,              bajo_costo,          2).
+aporta(mvc,              mantenibilidad,      1).
+
+aporta(onion,            mantenibilidad,      3).
+aporta(onion,            testabilidad,        3).
+aporta(onion,            independencia_tecnologica, 2).
+aporta(onion,            modularidad,         2).
+aporta(onion,            consistencia,        2).
+
+aporta(hexagonal,        independencia_tecnologica, 3).
+aporta(hexagonal,        testabilidad,        3).
+aporta(hexagonal,        desacople,           3).
+aporta(hexagonal,        mantenibilidad,      2).
+aporta(hexagonal,        modularidad,         2).
+
+aporta(soa,              interoperabilidad,   3).
+aporta(soa,              modularidad,         2).
+aporta(soa,              escalabilidad,       2).
+aporta(soa,              independencia_despliegue, 2).
+aporta(soa,              desacople,           2).
+aporta(soa,              disponibilidad,      1).
+
+aporta(cliente_servidor, centralizacion_datos, 3).
+aporta(cliente_servidor, consistencia,        3).
+aporta(cliente_servidor, simplicidad,         2).
+aporta(cliente_servidor, bajo_costo,          2).
+aporta(cliente_servidor, rapidez_desarrollo,  2).
+
+aporta(clean,            mantenibilidad,      3).
+aporta(clean,            testabilidad,        3).
+aporta(clean,            independencia_tecnologica, 3).
+aporta(clean,            modularidad,         3).
+aporta(clean,            desacople,           2).
 
 /* --- 1.5 Exclusiones duras: el estilo NO es viable con ese requisito ----
         incompatible(Estilo, Requisito) ----------------------------------- */
@@ -89,6 +176,8 @@ incompatible(serverless,       procesos_largos).
 incompatible(serverless,       latencia_critica).
 incompatible(monolito_capas,   despliegue_independiente).
 incompatible(eventos,          consistencia_estricta).
+incompatible(soa,              latencia_critica).          % el bus agrega saltos de red
+incompatible(cliente_servidor, despliegue_independiente).  % el servidor es una sola pieza
 
 /* --- 1.6 Penalizaciones blandas: el estilo es viable pero pierde puntos --
         penaliza(Estilo, Requisito, Peso) --------------------------------- */
@@ -102,6 +191,25 @@ penaliza(monolito_modular, despliegue_independiente, 2).
 penaliza(serverless,       consistencia_estricta,   1).
 penaliza(eventos,          entrega_rapida,          1).
 penaliza(eventos,          equipo_pequeno,          1).
+% Penalizaciones de los estilos nuevos (valores iniciales propuestos)
+penaliza(mvc,              dominio_complejo,        1).
+penaliza(mvc,              muchos_usuarios,         1).
+penaliza(onion,            entrega_rapida,          2).
+penaliza(onion,            equipo_pequeno,          1).
+penaliza(onion,            presupuesto_bajo,        1).
+penaliza(hexagonal,        entrega_rapida,          2).
+penaliza(hexagonal,        equipo_pequeno,          1).
+penaliza(clean,            entrega_rapida,          2).
+penaliza(clean,            equipo_pequeno,          1).
+penaliza(clean,            presupuesto_bajo,        1).
+penaliza(soa,              sin_experiencia_devops,  2).
+penaliza(soa,              presupuesto_bajo,        2).
+penaliza(soa,              entrega_rapida,          1).
+penaliza(soa,              latencia_critica,        1).
+penaliza(cliente_servidor, muchos_usuarios,         2).
+penaliza(cliente_servidor, disponibilidad_alta,     2).
+penaliza(cliente_servidor, carga_variable,          1).
+penaliza(cliente_servidor, despliegue_independiente, 1).
 
 /* --- 1.7 Umbrales de prioridad: umbral_prioridad(Nivel, PuntajeMinimo) --
         Se evaluan de mayor a menor en nivel_prioridad/2. ----------------- */
@@ -131,6 +239,12 @@ etiqueta(despliegue_independiente, 'Desplegar partes del sistema por separado').
 etiqueta(dominio_complejo,        'Dominio complejo (muchas reglas de negocio)').
 etiqueta(integracion_asincrona,   'Intercambio de mensajes sin esperar respuesta').
 etiqueta(consistencia_estricta,   'Consistencia estricta de datos (transacciones)').
+etiqueta(mantenibilidad_largo_plazo,     'El sistema debe mantenerse y evolucionar por anos').
+etiqueta(testabilidad_alta,              'Pruebas automaticas faciles (alta testabilidad)').
+etiqueta(independencia_tecnologica,      'Poder cambiar base de datos o framework sin reescribir').
+etiqueta(integracion_sistemas_heredados, 'Integrar sistemas existentes o heredados').
+etiqueta(separar_interfaz_logica,        'Separar interfaz de usuario y logica').
+etiqueta(datos_centralizados,            'Datos centralizados con varios clientes').
 
 /* --- 1.10 Pregunta que el sistema hace cuando necesita ese dato ---------
         pregunta(Requisito, Texto). Se usa en el modulo "Que falta?". ---- */
@@ -148,6 +262,12 @@ pregunta(despliegue_independiente, 'Se necesita actualizar una parte sin redespl
 pregunta(dominio_complejo,        'El negocio tiene muchas reglas y subdominios distintos?').
 pregunta(integracion_asincrona,   'Los modulos o sistemas se comunican por mensajes o eventos?').
 pregunta(consistencia_estricta,   'Las operaciones exigen transacciones con datos siempre consistentes?').
+pregunta(mantenibilidad_largo_plazo,     'El sistema vivira muchos anos y debera evolucionar con facilidad?').
+pregunta(testabilidad_alta,              'Es importante probar la logica de negocio de forma automatica y aislada?').
+pregunta(independencia_tecnologica,      'Puede cambiar la base de datos, el framework o la interfaz en el futuro?').
+pregunta(integracion_sistemas_heredados, 'Debe conectarse con sistemas ya existentes o heredados?').
+pregunta(separar_interfaz_logica,        'Se necesita separar claramente la interfaz de usuario de la logica?').
+pregunta(datos_centralizados,            'Los datos deben vivir en un solo lugar al que acceden varios clientes?').
 
 /* --- 1.11 Requisitos que no pueden estar juntos -------------------------
         excluyentes(A, B): si ya se ingreso uno, no se sugiere el otro. -- */
@@ -178,6 +298,18 @@ descripcion_estilo(serverless,
     'Funciones que se ejecutan bajo demanda en la nube. Escala sola y se paga por uso, pero no sirve para tareas largas.').
 descripcion_estilo(eventos,
     'Componentes que se comunican publicando y escuchando eventos. Muy desacoplada, pero con consistencia eventual.').
+descripcion_estilo(mvc,
+    'Separa la aplicacion en Modelo, Vista y Controlador. Ordena la interfaz y la logica; ideal para aplicaciones web y de escritorio pequenas o medianas.').
+descripcion_estilo(onion,
+    'Capas concentricas con el dominio en el centro y las dependencias apuntando hacia adentro. Facil de probar y de mantener a largo plazo.').
+descripcion_estilo(hexagonal,
+    'El nucleo de negocio se comunica con el exterior mediante puertos y adaptadores. Permite cambiar base de datos, framework o interfaz sin tocar el dominio.').
+descripcion_estilo(soa,
+    'Servicios de negocio reutilizables que se integran, normalmente por un bus empresarial. Pensada para conectar sistemas existentes en organizaciones grandes.').
+descripcion_estilo(cliente_servidor,
+    'Clientes que piden servicios a un servidor central que concentra datos y logica. Simple y facil de administrar, pero el servidor es un punto unico de falla.').
+descripcion_estilo(clean,
+    'Capas con reglas de dependencia estrictas: entidades, casos de uso, adaptadores y frameworks. Maxima independencia tecnologica y capacidad de prueba, con mas codigo inicial.').
 
 /* ==========================================================================
    SECCION 2. REGLAS - NIVEL 1 (validacion preliminar y listas)
@@ -810,3 +942,424 @@ estilos_disponibles(Lista) :-
    los ofrece como "ejemplos rapidos" para cargar un caso tipico. */
 perfiles_disponibles(Lista) :-
     findall([P, Rs], perfil(P, Rs), Lista).
+
+/* ==========================================================================
+   SECCION 8. APRENDIZAJE EN CALIENTE (adquisicion de conocimiento)
+   El usuario describe un estilo nuevo eligiendo requisitos; Prolog valida,
+   lo traduce a hechos aporta/3 e incompatible/2 y lo agrega con assertz/1.
+   Como todas las reglas de las secciones 2 a 7 consultan estos hechos, el
+   estilo nuevo compite en ranking, candidatos, descartes y "Que falta?"
+   sin reiniciar. Python solo envia los datos y muestra la respuesta.
+   ========================================================================== */
+
+/* --- 8.1 Parametros del aprendizaje -------------------------------------- */
+umbral_generalidad(70).    % porcentaje de requisitos en "Favorece" a partir
+                           % del cual el estilo se considera demasiado general
+descripcion_por_defecto('Arquitectura definida por el usuario.').
+archivo_aprendizaje('conocimiento_aprendido.pl').
+
+/* sin_tilde(+Codigo, -CodigoAscii): vocal con tilde, dieresis o acento
+   (y enie / cedilla) -> letra ASCII. Se escriben como codigos numericos
+   para que el .pl siga sin caracteres especiales. Solo minusculas, porque
+   nombre_a_id/2 pasa el nombre a minuscula antes de traducir. */
+sin_tilde(225, 0'a). sin_tilde(224, 0'a). sin_tilde(228, 0'a). sin_tilde(226, 0'a).
+sin_tilde(233, 0'e). sin_tilde(232, 0'e). sin_tilde(235, 0'e). sin_tilde(234, 0'e).
+sin_tilde(237, 0'i). sin_tilde(236, 0'i). sin_tilde(239, 0'i). sin_tilde(238, 0'i).
+sin_tilde(243, 0'o). sin_tilde(242, 0'o). sin_tilde(246, 0'o). sin_tilde(244, 0'o).
+sin_tilde(250, 0'u). sin_tilde(249, 0'u). sin_tilde(252, 0'u). sin_tilde(251, 0'u).
+sin_tilde(241, 0'n). sin_tilde(231, 0'c).
+
+/* separador_nombre(+Codigo): caracteres que separan palabras en el nombre
+   y se convierten en "_" (espacio, guion y guion bajo). */
+separador_nombre(32). separador_nombre(45). separador_nombre(95).
+
+/* --- 8.2 Normalizacion de textos y del identificador --------------------- */
+
+/* texto_limpio(+T, -Atomo): T como atomo, sin espacios al inicio ni al
+   final y con espacios internos simples. Si T no es texto devuelve ''
+   (asi la validacion lo reporta como nombre vacio). Corte = clausulas
+   excluyentes. */
+texto_limpio(T, A) :-
+    ( atom(T) ; string(T) ), !,
+    normalize_space(atom(A), T).
+texto_limpio(_, '').
+
+/* nombre_a_id(+Nombre, -Id): identificador derivado del nombre:
+   minusculas, letras con tilde a su letra base, espacios y guiones a "_",
+   cualquier otro simbolo se elimina, sin "_" repetidos ni en los bordes.
+   'Mi Arquitectura de Prueba!' -> mi_arquitectura_de_prueba */
+nombre_a_id(Nombre, Id) :-
+    downcase_atom(Nombre, Min),
+    atom_codes(Min, Cs),
+    maplist(traducir_codigo, Cs, Partes),
+    append(Partes, Cs1),
+    colapsar_guiones(Cs1, Cs2),
+    recortar_guiones(Cs2, Cs3),
+    atom_codes(Id, Cs3).
+
+/* traducir_codigo(+C, -Lista): 0 o 1 codigos ASCII que reemplazan a C.
+   Los cortes hacen las clausulas excluyentes: la primera que reconoce el
+   caracter decide, y la ultima (eliminar) solo se alcanza si ninguna lo
+   reconocio. */
+traducir_codigo(C, [C]) :- between(0'a, 0'z, C), !.
+traducir_codigo(C, [C]) :- between(0'0, 0'9, C), !.
+traducir_codigo(C, [B]) :- sin_tilde(C, B), !.
+traducir_codigo(C, [95]) :- separador_nombre(C), !.
+traducir_codigo(_, []).
+
+/* colapsar_guiones(+Cs, -Rs): "__" -> "_" (95 es el codigo de "_"). El
+   corte evita que, en backtracking, la clausula general deje pasar el
+   guion repetido. */
+colapsar_guiones([], []).
+colapsar_guiones([95, 95|T], R) :- !,
+    colapsar_guiones([95|T], R).
+colapsar_guiones([C|T], [C|R]) :-
+    colapsar_guiones(T, R).
+
+/* recortar_guiones(+Cs, -Rs): quita "_" al inicio y al final. */
+recortar_guiones(Cs, Rs) :-
+    quitar_guiones_inicio(Cs, C1),
+    reverse(C1, R1),
+    quitar_guiones_inicio(R1, R2),
+    reverse(R2, Rs).
+
+quitar_guiones_inicio([95|T], R) :- !,       % corte: habia guion, se quita
+    quitar_guiones_inicio(T, R).
+quitar_guiones_inicio(L, L).
+
+/* --- 8.3 Normalizacion de las listas que llegan desde Python ------------- */
+
+/* favorece_normalizado(+F, -Pares): [[Req, Peso], ...] -> [Req-Peso, ...].
+   Si F no es lista devuelve el atomo formato_invalido. Un elemento mal
+   formado se conserva como mal(Elemento) para que la validacion lo
+   reporte en vez de ignorarlo en silencio. Cortes = clausulas
+   excluyentes. */
+favorece_normalizado(F, Pares) :-
+    is_list(F), !,
+    maplist(par_favorece, F, Pares).
+favorece_normalizado(_, formato_invalido).
+
+par_favorece([R0, P], R-P) :-
+    atom(R0), !,
+    downcase_atom(R0, R).
+par_favorece(X, mal(X)).
+
+/* incompatibles_normalizados(+I, -Lista): requisitos en minuscula y sin
+   repetidos, o formato_invalido si I no es lista. */
+incompatibles_normalizados(I, Lista) :-
+    is_list(I), !,
+    maplist(req_incompatible, I, L0),
+    list_to_set(L0, Lista).
+incompatibles_normalizados(_, formato_invalido).
+
+req_incompatible(R0, R) :-
+    atom(R0), !,
+    downcase_atom(R0, R).
+req_incompatible(X, mal(X)).
+
+/* peso_valido(+P): entero entre 1 y 3, la misma escala de aporta/3. */
+peso_valido(P) :-
+    integer(P), P >= 1, P =< 3.
+
+/* ignorado_en_favorece(+Fav, -R): requisito marcado en "Favorece" que no
+   exige ningun atributo de calidad (p. ej. procesos_largos). Negacion por
+   fallo con R ya instanciado por member/2. */
+ignorado_en_favorece(Fav, R) :-
+    member(R-_, Fav),
+    \+ requisito_atributo(R, _).
+
+/* --- 8.4 Validacion ---------------------------------------------------------
+   primer_error(+Nombre, +Id, +Fav, +Inc, -Error): revisa las reglas de
+   validacion EN ORDEN y devuelve la primera que se incumple, o 'ninguno'.
+   Cada clausula termina en corte: si su condicion se cumple ya no se deben
+   probar las siguientes (son excluyentes por orden). Las condiciones con
+   \+ se evaluan con la variable ya ligada por member/2, asi la negacion
+   por fallo es segura. */
+primer_error('', _, _, _, nombre_vacio) :- !.
+primer_error(_, '', _, _, nombre_invalido) :- !.
+primer_error(_, Id, _, _, nombre_duplicado(Id)) :-
+    estilo(Id, _), !.
+primer_error(_, _, formato_invalido, _, formato_invalido) :- !.
+primer_error(_, _, _, formato_invalido, formato_invalido) :- !.
+primer_error(_, _, Fav, Inc, formato_invalido) :-
+    ( memberchk(mal(_), Fav) ; memberchk(mal(_), Inc) ), !.
+primer_error(_, _, Fav, _, requisito_desconocido(R)) :-
+    member(R-_, Fav), \+ requisito_conocido(R), !.
+primer_error(_, _, _, Inc, requisito_desconocido(R)) :-
+    member(R, Inc), \+ requisito_conocido(R), !.
+primer_error(_, _, Fav, _, peso_invalido(R, P)) :-
+    member(R-P, Fav), \+ peso_valido(P), !.
+primer_error(_, _, [], _, sin_requisitos) :- !.
+primer_error(_, _, Fav, Inc, requisito_en_ambas(R)) :-
+    member(R-_, Fav), memberchk(R, Inc), !.
+primer_error(_, _, Fav, _, sin_requisitos_utiles(Ign)) :-
+    \+ ( member(R-_, Fav), requisito_atributo(R, _) ), !,
+    findall(X, ignorado_en_favorece(Fav, X), Ign).
+primer_error(_, _, _, _, ninguno).
+
+/* --- 8.5 Ensenar un estilo -------------------------------------------------
+   ensenar_estilo(+Nombre, +Descripcion, +Favorece, +Incompatibles, -Resultado)
+     Favorece      = [[Requisito, Peso], ...]   (Peso entre 1 y 3)
+     Incompatibles = [Requisito, ...]
+     Resultado     = ok(Id, Ignorados) | error(Motivo)
+   Ignorados son los requisitos de "Favorece" sin atributo de calidad: no
+   se pueden traducir a aporta/3 y se informan al usuario.
+   ensenar_estilo/6 devuelve ademas Advertencias (lista de textos) y es la
+   que usa la interfaz. Una advertencia NO impide guardar. */
+ensenar_estilo(Nombre, Descripcion, Favorece, Incompatibles, Resultado) :-
+    ensenar_estilo(Nombre, Descripcion, Favorece, Incompatibles, Resultado, _).
+
+ensenar_estilo(Nombre, Descripcion, Favorece, Incompatibles, Resultado, Advertencias) :-
+    texto_limpio(Nombre, Nom),
+    nombre_a_id(Nom, Id),
+    favorece_normalizado(Favorece, Fav),
+    incompatibles_normalizados(Incompatibles, Inc),
+    primer_error(Nom, Id, Fav, Inc, Error),
+    aplicar_ensenanza(Error, Id, Nom, Descripcion, Fav, Inc, Resultado, Advertencias).
+
+/* aplicar_ensenanza(+Error, ...): si hubo error la base no se toca. El
+   corte de la 1a clausula impide registrar un estilo invalido. */
+aplicar_ensenanza(Error, _, _, _, _, _, error(Error), []) :-
+    Error \== ninguno, !.
+aplicar_ensenanza(ninguno, Id, Nom, Descripcion, Fav, Inc, ok(Id, Ignorados), Advertencias) :-
+    texto_limpio(Descripcion, D0),
+    descripcion_o_defecto(D0, Desc),
+    findall(R, ignorado_en_favorece(Fav, R), Ignorados),
+    registrar_estilo(Id, Nom, Desc, Fav, Inc),
+    advertencias_estilo(Fav, Advertencias).
+
+/* descripcion_o_defecto(+D0, -D): la descripcion es opcional. */
+descripcion_o_defecto('', D) :- !,
+    descripcion_por_defecto(D).
+descripcion_o_defecto(D, D).
+
+/* registrar_estilo(+Id, +Nombre, +Desc, +Fav, +Inc): traduce lo marcado a
+   hechos. Cada requisito de "Favorece" se vuelve aporta(Id, Atributo, Peso)
+   usando requisito_atributo/2. Si dos requisitos exigen el mismo atributo
+   (equipo_grande y dominio_complejo -> modularidad) se guarda UN solo
+   aporta/3 con el peso mayor, porque aporte_total/3 cuenta cada atributo
+   una vez. Cada requisito de "Incompatible" se vuelve incompatible/2. */
+registrar_estilo(Id, Nom, Desc, Fav, Inc) :-
+    assertz(estilo_aprendido(Id)),
+    assertz(estilo(Id, Nom)),
+    assertz(descripcion_estilo(Id, Desc)),
+    findall(A-P, ( member(R-P, Fav), requisito_atributo(R, A) ), AP),
+    findall(A, member(A-_, AP), As0),
+    sort(As0, As),
+    forall(member(A, As),
+           ( aggregate_all(max(P), member(A-P, AP), Max),
+             assertz(aporta(Id, A, Max)) )),
+    forall(member(R, Inc), assertz(incompatible(Id, R))).
+
+/* advertencias_estilo(+Fav, -Advertencias): si se marco como "Favorece" mas
+   del umbral_generalidad (70 %) de los requisitos conocidos, el estilo
+   sumara puntos en casi cualquier caso y tendera a ganar siempre. El corte
+   hace excluyente la clausula por defecto (sin advertencias). */
+advertencias_estilo(Fav, [Texto]) :-
+    length(Fav, N),
+    aggregate_all(count, requisito_categoria(_, _), Total),
+    umbral_generalidad(U),
+    N * 100 > U * Total, !,
+    format(atom(Texto),
+           'Estilo demasiado general: favorece ~w de ~w requisitos (mas del ~w %), tendera a ganar siempre.',
+           [N, Total, U]).
+advertencias_estilo(_, []).
+
+/* --- 8.6 Mensajes legibles (sin tildes, igual que las etiquetas) ---------
+   mensaje_resultado(+Resultado, -Texto). Cortes = clausulas excluyentes. */
+mensaje_resultado(ok(Id, []), T) :- !,
+    estilo(Id, N),
+    format(atom(T), 'Arquitectura "~w" guardada con el identificador ~w.', [N, Id]).
+mensaje_resultado(ok(Id, Ign), T) :- !,
+    estilo(Id, N),
+    textos_requisitos(Ign, Txt),
+    format(atom(T),
+           'Arquitectura "~w" guardada con el identificador ~w. Se ignoraron en Favorece porque no exigen ningun atributo de calidad: ~w.',
+           [N, Id, Txt]).
+mensaje_resultado(error(M), T) :-
+    mensaje_error(M, T), !.
+mensaje_resultado(R, T) :-
+    format(atom(T), 'Resultado no reconocido: ~w', [R]).
+
+mensaje_error(nombre_vacio, 'Escriba un nombre para la arquitectura.').
+mensaje_error(nombre_invalido, 'El nombre debe tener al menos una letra o un numero.').
+mensaje_error(nombre_duplicado(Id), T) :-
+    format(atom(T), 'Ya existe una arquitectura con el identificador ~w. Use otro nombre.', [Id]).
+mensaje_error(formato_invalido, 'Los datos enviados no tienen el formato esperado.').
+mensaje_error(requisito_desconocido(R), T) :-
+    format(atom(T), 'El requisito ~w no esta en la base de conocimiento.', [R]).
+mensaje_error(peso_invalido(R, P), T) :-
+    texto_requisito(R, Tr),
+    format(atom(T), 'El peso de "~w" debe estar entre 1 y 3 (llego ~w).', [Tr, P]).
+mensaje_error(sin_requisitos, 'Marque al menos un requisito en la columna Favorece.').
+mensaje_error(requisito_en_ambas(R), T) :-
+    texto_requisito(R, Tr),
+    format(atom(T), 'El requisito "~w" esta marcado como Favorece e Incompatible a la vez.', [Tr]).
+mensaje_error(sin_requisitos_utiles(Ign), T) :-
+    textos_requisitos(Ign, Txt),
+    format(atom(T),
+           'Ningun requisito de Favorece exige un atributo de calidad (~w). Marque al menos otro.',
+           [Txt]).
+
+/* tipo_resultado(+Resultado, -Tipo, -Id): permite que la interfaz lea la
+   respuesta (ok / error) sin interpretar terminos compuestos. */
+tipo_resultado(ok(Id, _), ok, Id).
+tipo_resultado(error(_), error, '').
+
+/* texto_requisito(+R, -T): etiqueta del requisito o, si no tiene, su id. */
+texto_requisito(R, T) :-
+    etiqueta(R, T), !.
+texto_requisito(R, R).
+
+textos_requisitos(Rs, Txt) :-
+    maplist(texto_requisito, Rs, Ts),
+    atomic_list_concat(Ts, ', ', Txt).
+
+/* --- 8.7 Olvidar -----------------------------------------------------------
+   olvidar_estilo(+Id): borra un estilo APRENDIDO con todos sus hechos.
+   Falla si Id es del experto o no existe: la marca estilo_aprendido/1 es
+   la unica puerta, asi nunca se borra conocimiento del experto. El corte
+   evita reintentar despues de borrar. */
+olvidar_estilo(Id) :-
+    atom(Id),
+    estilo_aprendido(Id), !,
+    borrar_hechos_estilo(Id).
+
+borrar_hechos_estilo(Id) :-
+    retractall(estilo_aprendido(Id)),
+    retractall(estilo(Id, _)),
+    retractall(descripcion_estilo(Id, _)),
+    retractall(aporta(Id, _, _)),
+    retractall(incompatible(Id, _)),
+    retractall(penaliza(Id, _, _)).
+
+/* olvidar_aprendizaje: borra TODO lo aprendido (lo usan las pruebas y la
+   recarga). findall primero para no modificar estilo_aprendido/1 mientras
+   se recorre. Siempre tiene exito. */
+olvidar_aprendizaje :-
+    findall(Id, estilo_aprendido(Id), Ids),
+    forall(member(Id, Ids), borrar_hechos_estilo(Id)).
+
+/* estilos_aprendidos(-Lista): [[Id, Nombre], ...] para la interfaz. */
+estilos_aprendidos(Lista) :-
+    findall([Id, N], ( estilo_aprendido(Id), estilo(Id, N) ), Lista).
+
+/* --- 8.8 Persistencia ------------------------------------------------------
+   ruta_aprendizaje(-Ruta): conocimiento_aprendido.pl en la carpeta de la
+   base (directorio_base/1 se fija al consultar este archivo). */
+ruta_aprendizaje(Ruta) :-
+    directorio_base(Dir),
+    archivo_aprendizaje(Archivo),
+    directory_file_path(Dir, Archivo, Ruta).
+
+/* guardar_aprendizaje: escribe todo lo aprendido en la ruta por defecto.
+   guardar_aprendizaje(+Ruta): idem en otra ruta (las pruebas la usan para
+   no tocar el archivo real). setup_call_cleanup cierra el archivo aunque
+   falle la escritura. */
+guardar_aprendizaje :-
+    ruta_aprendizaje(Ruta),
+    guardar_aprendizaje(Ruta).
+
+guardar_aprendizaje(Ruta) :-
+    setup_call_cleanup(open(Ruta, write, S, [encoding(utf8)]),
+                       escribir_aprendizaje(S),
+                       close(S)).
+
+escribir_aprendizaje(S) :-
+    format(S, '/* conocimiento_aprendido.pl - generado por ArquiSelect.~n', []),
+    format(S, '   Estilos ensenados desde la interfaz. Lo lee cargar_aprendizaje/1~n', []),
+    format(S, '   (no se consulta directamente). */~n~n', []),
+    forall(estilo_aprendido(Id),
+           ( forall(hecho_de_estilo(Id, H), portray_clause(S, H)),
+             nl(S) )).
+
+/* hecho_de_estilo(+Id, -Hecho): todos los hechos que describen un estilo. */
+hecho_de_estilo(Id, estilo_aprendido(Id)).
+hecho_de_estilo(Id, estilo(Id, N))             :- estilo(Id, N).
+hecho_de_estilo(Id, descripcion_estilo(Id, D)) :- descripcion_estilo(Id, D).
+hecho_de_estilo(Id, aporta(Id, A, P))          :- aporta(Id, A, P).
+hecho_de_estilo(Id, incompatible(Id, R))       :- incompatible(Id, R).
+hecho_de_estilo(Id, penaliza(Id, R, P))        :- penaliza(Id, R, P).
+
+/* cargar_aprendizaje(+Ruta): lo llama la interfaz al iniciar y despues de
+   reconsultar la base. Primero olvida lo aprendido, asi nunca se duplica
+   nada aunque se llame dos veces.
+   El archivo NO se consulta: se leen sus terminos y solo se aceptan los
+   hechos de la lista blanca, con tipos validos y para ids que no sean del
+   experto. Asi un archivo editado a mano no puede redefinir reglas.
+   cargar_aprendizaje(+Ruta, -Estado): Estado = cargado(N) | sin_archivo |
+   danado(Respaldo). Si el archivo esta danado se renombra a Respaldo, la
+   base queda solo con lo del experto y la aplicacion arranca igual. */
+cargar_aprendizaje(Ruta) :-
+    cargar_aprendizaje(Ruta, _).
+
+/* estado_carga(+Estado, -Tipo, -Detalle): lectura simple del estado para
+   la interfaz (cuantos estilos se cargaron o donde quedo el respaldo). */
+estado_carga(cargado(N), cargado, N).
+estado_carga(sin_archivo, sin_archivo, 0).
+estado_carga(danado(Respaldo), danado, Respaldo).
+
+cargar_aprendizaje(Ruta, Estado) :-
+    olvidar_aprendizaje,
+    cargar_archivo_aprendizaje(Ruta, Estado).
+
+/* Cortes = clausulas excluyentes: sin archivo / leido bien / danado. */
+cargar_archivo_aprendizaje(Ruta, sin_archivo) :-
+    \+ exists_file(Ruta), !.
+cargar_archivo_aprendizaje(Ruta, Estado) :-
+    catch(leer_terminos_archivo(Ruta, Terminos), _Error, fail), !,
+    incorporar_terminos(Terminos),
+    aggregate_all(count, estilo_aprendido(_), N),
+    Estado = cargado(N).
+cargar_archivo_aprendizaje(Ruta, danado(Respaldo)) :-
+    atom_concat(Ruta, '.danado', Respaldo),
+    catch(( exists_file(Respaldo) -> delete_file(Respaldo) ; true ), _, true),
+    catch(rename_file(Ruta, Respaldo), _, true).
+
+leer_terminos_archivo(Ruta, Terminos) :-
+    setup_call_cleanup(open(Ruta, read, S, [encoding(utf8)]),
+                       leer_terminos(S, Terminos),
+                       close(S)).
+
+/* leer_terminos(+Stream, -Terminos): lee hasta end_of_file. Un error de
+   sintaxis lanza excepcion y se atrapa en cargar_archivo_aprendizaje/2.
+   Corte = fin de archivo excluye seguir leyendo. */
+leer_terminos(S, Terminos) :-
+    read_term(S, T, []),
+    leer_terminos_resto(T, S, Terminos).
+
+leer_terminos_resto(end_of_file, _, []) :- !.
+leer_terminos_resto(T, S, [T|R]) :-
+    leer_terminos(S, R).
+
+/* incorporar_terminos(+Ts): agrega los estilos marcados como aprendidos.
+   \+ estilo(Id, _) con Id ya ligado: un id del experto nunca se acepta. */
+incorporar_terminos(Ts) :-
+    findall(Id,
+            ( member(estilo_aprendido(Id), Ts), atom(Id), \+ estilo(Id, _) ),
+            Ids0),
+    list_to_set(Ids0, Ids),
+    forall(member(Id, Ids), incorporar_estilo(Id, Ts)).
+
+/* incorporar_estilo(+Id, +Ts): un estilo sin nombre valido no se carga
+   (2a clausula). El corte de la 1a evita tomar un segundo nombre. */
+incorporar_estilo(Id, Ts) :-
+    member(estilo(Id, Nom), Ts), atom(Nom), !,
+    assertz(estilo_aprendido(Id)),
+    assertz(estilo(Id, Nom)),
+    descripcion_cargada(Id, Ts, Desc),
+    assertz(descripcion_estilo(Id, Desc)),
+    forall(( member(aporta(Id, A, P), Ts), atom(A), peso_valido(P) ),
+           assertz(aporta(Id, A, P))),
+    forall(( member(incompatible(Id, R), Ts), atom(R), requisito_conocido(R) ),
+           assertz(incompatible(Id, R))),
+    forall(( member(penaliza(Id, R, P), Ts), atom(R), requisito_conocido(R),
+             peso_valido(P) ),
+           assertz(penaliza(Id, R, P))).
+incorporar_estilo(_, _).
+
+/* descripcion_cargada(+Id, +Ts, -D): descripcion guardada o la de defecto. */
+descripcion_cargada(Id, Ts, D) :-
+    member(descripcion_estilo(Id, D), Ts), atom(D), !.
+descripcion_cargada(_, _, D) :-
+    descripcion_por_defecto(D).

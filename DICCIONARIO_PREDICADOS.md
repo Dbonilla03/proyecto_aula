@@ -84,3 +84,22 @@ El sistema sugiere primero preguntar si el equipo tiene menos de 5 personas. Si 
 ## 7. Nota técnica sobre los predicados *steadfast*
 
 `ranking/2` y `estado_dictamen/2` usan cortes, así que si se llaman con la salida ya instanciada (por ejemplo, `estado_dictamen(V, empate)`) Prolog puede saltarse las cláusulas que tienen el corte y dar una respuesta incorrecta: una lista vacía pasaría por empate. Por eso `margen_lider/2`, `mejor_puntaje/2` y `hipotesis_en_competencia/2` los consultan con una variable libre y comparan después con `=` o `==`.
+
+## 8. Aprendizaje en caliente (sección 8 de `base_conocimiento.pl`)
+
+Los predicados `estilo/2`, `aporta/3`, `incompatible/2`, `penaliza/3` y `descripcion_estilo/2` se declaran `dynamic`. `estilo_aprendido/1` marca lo que enseñó el usuario, para distinguirlo de lo que escribió el experto. La base pasa de 5 a 11 estilos (`mvc`, `onion`, `hexagonal`, `soa`, `cliente_servidor`, `clean`) y de 14 a 20 requisitos.
+
+| Firma | Modo | Descripción funcional | Desde Python |
+|---|---|---|---|
+| `ensenar_estilo/5` | `+Nombre, +Descripcion, +Favorece, +Incompatibles, -Resultado` | `Favorece = [[Requisito, Peso], ...]`. Valida, deriva el id del nombre y agrega los hechos con `assertz`. `Resultado = ok(Id, Ignorados)` o `error(Motivo)`. | Interno (pruebas) |
+| `ensenar_estilo/6` | igual + `-Advertencias` | Igual que la /5, y además devuelve la advertencia de "estilo demasiado general" cuando más del 70 % de los requisitos están en Favorece. | `ensenar_estilo()` |
+| `primer_error/5` | `+Nombre, +Id, +Fav, +Inc, -Error` | Reglas de validación en orden: nombre vacío o inválido, id repetido, formato, requisito desconocido, peso fuera de 1..3, ningún requisito en Favorece, requisito en ambas columnas, ninguno con atributo. Devuelve `ninguno` si todo está bien. | Interno |
+| `nombre_a_id/2` | `+Nombre, -Id` | Minúsculas, sin tildes ni ñ, espacios y guiones a `_`, sin otros símbolos. | Interno |
+| `registrar_estilo/5` | `+Id, +Nombre, +Desc, +Fav, +Inc` | Traduce Favorece a `aporta/3` vía `requisito_atributo/2` (un atributo con el peso mayor) e Incompatible a `incompatible/2`. | Interno |
+| `mensaje_resultado/2`, `tipo_resultado/3` | `+Resultado, -Texto` / `+Resultado, -Tipo, -Id` | Texto legible y lectura simple del resultado para la interfaz. | `ensenar_estilo()` |
+| `olvidar_estilo/1` | `+Id` | Borra un estilo aprendido y todos sus hechos. Falla con los estilos del experto. | `olvidar_estilo()` |
+| `olvidar_aprendizaje/0` | — | Borra todo lo aprendido (pruebas y recarga). | `recargar()` |
+| `estilos_aprendidos/1` | `-Lista` | `[[Id, Nombre], ...]`. | `estilos_aprendidos()` |
+| `guardar_aprendizaje/0,1` | `[+Ruta]` | Escribe `conocimiento_aprendido.pl` junto a la base (o en `Ruta`). | `guardar_aprendizaje()` |
+| `cargar_aprendizaje/1,2` | `+Ruta [, -Estado]` | Olvida y vuelve a cargar lo aprendido leyendo términos (no hace `consult`): solo acepta hechos válidos de estilos aprendidos. `Estado = cargado(N) | sin_archivo | danado(Respaldo)`. Si el archivo está dañado lo renombra a `.danado` y la base sigue con lo del experto. | `recargar()` |
+| `estado_carga/3`, `ruta_aprendizaje/1` | | Lectura simple del estado de carga y ruta del archivo de aprendizaje. | `recargar()` |
