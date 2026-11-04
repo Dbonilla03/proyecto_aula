@@ -688,7 +688,7 @@ class VistaEvaluacion(ttk.Frame):
 
         btn_nueva = ttk.Button(
             card_otros, text="➕ Crear arquitectura nueva…", style="Secundario.TButton",
-            command=lambda: controlador.mostrar_vista("VistaNuevaArquitectura")
+            command=lambda: self.controlador.mostrar_vista("VistaNuevaArquitectura")
         )
         btn_nueva.pack(fill="x")
         Tooltip(btn_nueva, "Enseñe al sistema un estilo que no conoce eligiendo los requisitos "
