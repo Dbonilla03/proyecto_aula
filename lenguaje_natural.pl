@@ -370,11 +370,45 @@ cumple_umbral(mayor_igual, N, V) :- N >= V.
    Nunca lanza excepcion: catch/3 convierte cualquier error en listas
    vacias. La gramatica siempre analiza la entrada completa porque la
    clausula de omision consume cualquier token; el corte deja ese unico
-   analisis. */
+   analisis.
+   LIMITES (robustez): un texto con mas de limite_interpretacion(caracteres)
+   no se analiza (1a clausula), y el analisis se corta si tarda mas de
+   limite_interpretacion(segundos) (call_with_time_limit/2 lanza
+   time_limit_exceeded, que catch/3 atrapa). En ambos casos el aviso sale
+   en NoEntendido, que la interfaz ya muestra como "No entendi". */
 interpretar_texto(Texto, Requisitos, Negados, NoEntendido, Arbol) :-
-    catch(interpretar_seguro(Texto, Requisitos, Negados, NoEntendido, Arbol),
-          _Error,
-          ( Requisitos = [], Negados = [], NoEntendido = [], Arbol = oracion([]) )).
+    texto_demasiado_largo(Texto, Max), !,      % corte: no intentar analizarlo
+    format(atom(Aviso), '(texto demasiado largo: maximo ~w caracteres)', [Max]),
+    Requisitos = [], Negados = [], NoEntendido = [Aviso], Arbol = oracion([]).
+interpretar_texto(Texto, Requisitos, Negados, NoEntendido, Arbol) :-
+    limite_interpretacion(segundos, S),
+    catch(call_with_time_limit(S,
+              interpretar_seguro(Texto, Requisitos, Negados, NoEntendido, Arbol)),
+          Error,
+          resultado_por_error(Error, Requisitos, Negados, NoEntendido, Arbol)).
+
+/* limite_interpretacion(Que, Valor): dinamico para poder ajustarlo sin
+   tocar las reglas (las pruebas bajan el de segundos para forzar el corte). */
+:- use_module(library(time)).               % call_with_time_limit/2
+:- dynamic limite_interpretacion/2.
+limite_interpretacion(caracteres, 2000).
+limite_interpretacion(segundos, 2).
+
+/* texto_demasiado_largo(+Texto, -Max): solo aplica a atomos y strings (lo
+   demas lo rechaza normalizar_texto/2 sin error). El corte fija que es
+   texto antes de medirlo; si no supera el maximo, el predicado falla y
+   interpretar_texto/5 pasa a su 2a clausula. */
+texto_demasiado_largo(Texto, Max) :-
+    ( atom(Texto) ; string(Texto) ), !,
+    string_length(Texto, Largo),
+    limite_interpretacion(caracteres, Max),
+    Largo > Max.
+
+/* resultado_por_error(+Error, -Req, -Neg, -NoEnt, -Arbol): respuesta vacia.
+   Si fue por tiempo se avisa; cualquier otro error deja las listas vacias
+   como antes. Corte = clausulas excluyentes. */
+resultado_por_error(time_limit_exceeded, [], [], ['(tiempo de analisis agotado)'], oracion([])) :- !.
+resultado_por_error(_, [], [], [], oracion([])).
 
 interpretar_seguro(Texto, Requisitos, Negados, NoEntendido, Arbol) :-
     normalizar_texto(Texto, Tokens),

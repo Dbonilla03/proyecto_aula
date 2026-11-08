@@ -152,6 +152,7 @@ TILDES_COMUNES = {
     "concentricas": "concéntricas", "facil": "fácil", "nucleo": "núcleo",
     "maxima": "máxima", "tecnologica": "tecnológica", "codigo": "código", "faciles": "fáciles",
     "mas": "más", "numero": "número", "tendera": "tenderá",
+    "contradiccion": "contradicción", "tension": "tensión", "pequeno": "pequeño",
 }
 _PATRON_TILDES = re.compile(r"\b(" + "|".join(TILDES_COMUNES) + r")\b", re.IGNORECASE)
 
@@ -173,9 +174,14 @@ def bonito(texto: str) -> str:
 # ===========================================================================
 def atomo(texto):
     """Texto como átomo Prolog entre comillas simples (nunca variable libre).
-    Se escapan barra, comilla y saltos de línea para que la consulta sea válida."""
-    s = (str(texto).replace("\\", "\\\\").replace("'", "\\'")
+    Se escapan barra, comilla y saltos de línea para que la consulta sea válida.
+    Robustez: los surrogates sueltos (emojis mal partidos) se cambian por "�"
+    porque no se pueden codificar en UTF-8, y los demás caracteres de control
+    (NUL, ESC, tab...) se envían como espacio: un NUL cortaría la consulta."""
+    s = str(texto).encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    s = (s.replace("\\", "\\\\").replace("'", "\\'")
          .replace("\n", "\\n").replace("\r", ""))
+    s = re.sub(r"[\x00-\x09\x0b-\x1f\x7f]", " ", s)
     return f"'{s}'"
 
 
@@ -279,6 +285,13 @@ class PuenteProlog:
                 "Estado, Confianza, Competencia, Sugerencias)")
         return self.una_solucion("recomendacion", meta)
 
+    def consistencia(self, requisitos, negados=()):
+        """consistencia_entrada/4 (sección 10): {Estado, Lista}; Estado es
+        consistente | advertencia | bloqueado y Lista [[A, B, Tipo, Mensaje], ...]."""
+        meta = (f"consistencia_entrada({lista_prolog(requisitos)}, {lista_prolog(negados)}, "
+                "Estado, Lista)")
+        return self.una_solucion("consistencia", meta) or {"Estado": "consistente", "Lista": []}
+
     def resumen(self, requisitos):
         meta = (f"resumen_dictamen({lista_prolog(requisitos)}, "
                 "Mejor, AFavor, EnContra, SinEfecto)")
@@ -327,10 +340,15 @@ class PuenteProlog:
     # --- Lenguaje natural (lenguaje_natural.pl, entregable 3) ---
     def interpretar(self, texto):
         """interpretar_texto/5. Devuelve {requisitos, negados, no_entendido,
-        arbol}; arbol son las líneas con sangría que arma arbol_lineas/2."""
+        arbol}; arbol son las líneas con sangría que arma arbol_lineas/2.
+        Nunca lanza excepción: si la consulta misma falla se responde vacío."""
         meta = (f"interpretar_texto({atomo(texto)}, Requisitos, Negados, NoEntendido, _Arbol), "
                 "arbol_lineas(_Arbol, Lineas)")
-        r = self.una_solucion("interpretar", meta)
+        try:
+            r = self.una_solucion("interpretar", meta)
+        except Exception:
+            return {"requisitos": [], "negados": [], "no_entendido": ["(entrada no procesable)"],
+                    "arbol": []}
         if not r:
             return {"requisitos": [], "negados": [], "no_entendido": [], "arbol": []}
         return {"requisitos": r["Requisitos"], "negados": r["Negados"],
@@ -753,6 +771,7 @@ class VistaEvaluacion(ttk.Frame):
         self._ultima_explicacion = None
         self._reglas_disparadas = []
         self._porque_abierto = False
+        self._consistencia = {"Estado": "consistente", "Lista": []}   # consistencia_entrada/4
 
         # Encabezado
         construir_encabezado(
@@ -927,6 +946,13 @@ class VistaEvaluacion(ttk.Frame):
             padx=12, pady=6, anchor="w", justify="left", wraplength=820
         )
         self.lbl_estado.pack(fill="x")
+
+        # Banner ámbar de tensiones (consistencia_entrada/4): solo advierte,
+        # el diagnóstico sigue visible. Se empaqueta solo cuando hay tensiones.
+        self.lbl_tension = tk.Label(
+            self.card_dictamen, text="", font=(FUENTE_BASE, 9), bg=COLOR_AMBAR_BG,
+            fg=COLOR_AMBAR_TEXT, padx=12, pady=6, anchor="w", justify="left", wraplength=820
+        )
 
         # Cuaderno de Pestañas (Notebook)
         self.pestanas = ttk.Notebook(col)
@@ -1195,10 +1221,12 @@ class VistaEvaluacion(ttk.Frame):
 
     def recalcular(self):
         reqs = self.seleccion()
-        self.negados = [n for n in self.negados if n not in reqs]
+        # Un requisito marcado y también "No aplica" ya NO se corrige aquí:
+        # se envía tal cual y Prolog lo detecta como contradicción (sección 10).
         self._sincronizar_respuestas(reqs)
 
         try:
+            self._consistencia = self.puente.consistencia(reqs, self.negados)
             d = self.puente.diagnosticar(reqs)
             qf = self.puente.que_falta(reqs, self.negados)
             rs = self.puente.resumen(reqs)
@@ -1228,6 +1256,10 @@ class VistaEvaluacion(ttk.Frame):
         qf = self.puente.que_falta(reqs, self.negados)
         if not d:
             return
+        if qf and qf["Estado"] == "contradictorio":
+            messagebox.showwarning("Atención", "No se puede guardar: Prolog detectó una contradicción "
+                                               "dura en los requisitos.")
+            return
 
         estilo_nom = self.estilos.get(d["Mejor"], (d["Mejor"], ""))[0]
         reqs_legibles = [self.etiquetas.get(r, r) for r in reqs]
@@ -1254,8 +1286,30 @@ class VistaEvaluacion(ttk.Frame):
             bg_c, fg_c = COLOR_PRIORIDAD.get(str(valor).lower(), (COLOR_SUPERFICIE, COLOR_TEXTO_MUTED))
         self.chips[nombre].configure(text=f"  {txt}  ", bg=bg_c, fg=fg_c)
 
+    def _texto_contradicciones(self, tipo):
+        """Mensajes de consistencia_entrada/4 del tipo dado (dura | tension), legibles."""
+        return [con_tildes(bonito(m)) for _a, _b, t, m in self._consistencia["Lista"] if t == tipo]
+
     def _mostrar_dictamen(self, d, qf):
         estado = qf["Estado"]
+        tensiones = self._texto_contradicciones("tension")
+        if estado == "contradictorio":
+            # Contradicción dura: Prolog no dio recomendación (sección 10).
+            self.lbl_estilo.configure(text="⛔ Sin recomendación")
+            self.lbl_desc_estilo.configure(text="Los requisitos se contradicen. Corrija las casillas, "
+                                                "las respuestas «No aplica» o el texto para continuar.")
+            for c in self.chips:
+                self._chip(c, None)
+            lineas = (["⛔ " + m for m in self._texto_contradicciones("dura")]
+                      + ["⚠ " + m for m in tensiones])
+            self.lbl_estado.configure(text="\n".join(lineas), bg=COLOR_PELIGRO_BG, fg=COLOR_PELIGRO_TEXT)
+            self.lbl_tension.pack_forget()
+            return
+        if tensiones:
+            self.lbl_tension.configure(text="\n".join("⚠ " + m for m in tensiones))
+            self.lbl_tension.pack(fill="x", pady=(6, 0))
+        else:
+            self.lbl_tension.pack_forget()
         if estado == "vacio":
             self.lbl_estilo.configure(text="Monolito Modular (Por defecto)")
             self.lbl_desc_estilo.configure(text="Marque a la izquierda las características del proyecto para generar una recomendación personalizada.")
@@ -1278,7 +1332,8 @@ class VistaEvaluacion(ttk.Frame):
 
     def _mostrar_preguntas(self, d, qf):
         """Flujo tipo asistente: una pregunta a la vez, tomada de que_falta/6."""
-        lider = self.nombre_estilo(d["Mejor"])
+        bloqueado = qf["Estado"] == "contradictorio"
+        lider = "ninguno (entrada contradictoria)" if bloqueado else self.nombre_estilo(d["Mejor"])
         if qf["Estado"] == "vacio":
             lider += " (por defecto)"
         terminado = not qf["Sugerencias"] or qf["Estado"] == "definitivo"
@@ -1294,7 +1349,14 @@ class VistaEvaluacion(ttk.Frame):
         for h in card.winfo_children():
             h.destroy()
 
-        if terminado:
+        if bloqueado:
+            tk.Label(card, text="⛔ Evaluación bloqueada", font=(FUENTE_BASE, 14, "bold"),
+                     bg=COLOR_TARJETA, fg=COLOR_PELIGRO_TEXT).pack(anchor="w")
+            tk.Label(card, text="Prolog encontró una contradicción dura (ver el aviso rojo de arriba). "
+                                "Corrija los requisitos o use «↶ Deshacer última».",
+                     font=(FUENTE_BASE, 10), bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED,
+                     wraplength=760, justify="left").pack(anchor="w", pady=(4, 0))
+        elif terminado:
             tk.Label(card, text="✔ Evaluación lista", font=(FUENTE_BASE, 14, "bold"),
                      bg=COLOR_TARJETA, fg=COLOR_EXITO_TEXT).pack(anchor="w")
             motivo = ("El dictamen es definitivo." if qf["Estado"] == "definitivo"
@@ -1365,7 +1427,10 @@ class VistaEvaluacion(ttk.Frame):
                     self.sec_porque):
             sec.pack_forget()
 
-        if qf["Estado"] == "vacio":
+        if qf["Estado"] in ("vacio", "contradictorio"):
+            self.sec_vacio.configure(text="Responde las preguntas para ver las opciones"
+                                     if qf["Estado"] == "vacio" else
+                                     "⛔ Sin ranking: la entrada tiene una contradicción dura.")
             self.sec_vacio.pack(anchor="w", pady=8)
             return
 

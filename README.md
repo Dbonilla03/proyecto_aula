@@ -38,6 +38,10 @@ En la pantalla de **Inicio** está el selector **ROL: 👤 Usuario / 🛡 Expert
 | `conocimiento_aprendido.pl` | Lo enseñado en el Modo Experto: estilos, reglas (cláusulas escritas con `portray_clause/2`) y sinónimos. Se crea al guardar lo primero. Cada escritura es atómica (`.tmp` + `rename`) y deja una copia `.bak`. Si está dañado, la app arranca igual y avisa. |
 | `pruebas_entregable3.py` / `evidencia_entregable3.txt` | Pruebas del entregable 3 y su salida real. |
 | `pruebas.py` / `evidencia_pruebas.txt` | Pruebas del entregable 2 (siguen pasando). |
+| `pruebas_contradicciones.py` / `evidencia_contradicciones.txt` | Contradicciones duras/tensiones (sección 10 de la base), entradas hostiles al DCG, límites de longitud y tiempo, y prueba de la interfaz. |
+| `GUIA_SUSTENTACION.md` | Cortes probados uno por uno, modificaciones en vivo y preguntas probables. |
+| `arbol_logico.txt` | Árbol de llamadas generado del código real por `generar_arbol_logico.pl`. |
+| `probar_cortes.py` + `bateria_cortes.pl` → `evidencia_cortes.txt`, `tabla_cortes.md` | Quita cada `!` en una copia temporal y compara 100 consultas. |
 | `motor.py` | Consola del entregable 1. |
 | `historial_evaluaciones.json` | Evaluaciones guardadas. |
 

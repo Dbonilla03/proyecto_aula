@@ -308,6 +308,7 @@ confianza_estado(definitivo,   alta).
 confianza_estado(empate,       media).
 confianza_estado(insuficiente, baja).
 confianza_estado(vacio,        nula).
+confianza_estado(contradictorio, nula).   % seccion 10: entrada bloqueada
 
 /* --- 1.14 Descripcion corta de cada estilo (la muestra la interfaz) -----
         descripcion_estilo(Estilo, Texto). Sin tildes, igual que 1.9. --- */
@@ -625,7 +626,19 @@ razones(Estilo, Reqs, Razones) :-
     append([Favores, Penales, Expertas], Razones).
 
 /* diagnosticar_arquitectura(+Reqs, -Resultado...): PREDICADO PRINCIPAL.
-   Orquesta todo el razonamiento. Python solo lo invoca y lee las salidas. */
+   Orquesta todo el razonamiento. Python solo lo invoca y lee las salidas.
+   1a clausula (seccion 10): con una contradiccion dura NO hay recomendacion.
+   Mejor = ninguno, Prioridad = bloqueado y Razones = mensajes de la
+   contradiccion. El corte impide llegar a la 2a clausula (la que
+   recomienda). Las salidas se ligan DESPUES del corte, no en la cabeza: asi
+   el predicado es "steadfast" y aunque se llame con Mejor ya fijado no se
+   salta el bloqueo. */
+diagnosticar_arquitectura(Reqs, Mejor, Prioridad, Ranking, Descartados,
+                          Razones, Perfil, Desconocidos, Suficiencia) :-
+    bloqueo_duro(Reqs, [], Mensajes), !,
+    preparar_requisitos(Reqs, _, Desconocidos),
+    Mejor = ninguno, Prioridad = bloqueado, Ranking = [], Descartados = [],
+    Razones = Mensajes, Perfil = ninguno, Suficiencia = contradictoria.
 diagnosticar_arquitectura(Reqs, Mejor, Prioridad, Ranking, Descartados,
                           Razones, Perfil, Desconocidos, Suficiencia) :-
     preparar_requisitos(Reqs, Validos, Desconocidos),
@@ -979,7 +992,16 @@ que_falta(Reqs, Estado, Confianza, Competencia, Sugerencias) :-
 /* que_falta(+Reqs, +Negados, -Estado, -Confianza, -Competencia, -Sugerencias):
    PREDICADO PRINCIPAL DEL MODULO "Que falta?". Negados son los requisitos
    a los que el usuario respondio "no aplica": no se vuelven a preguntar.
-   Pasan por la misma validacion que Reqs. */
+   Pasan por la misma validacion que Reqs.
+   1a clausula (seccion 10): con una contradiccion dura (incluido un
+   requisito afirmado y negado a la vez) Estado = contradictorio, sin
+   competencia ni sugerencias. Mismo patron que diagnosticar_arquitectura/9:
+   corte para no llegar a la 2a clausula y salidas ligadas despues del corte. */
+que_falta(Reqs, Negados, Estado, Confianza, Competencia, Sugerencias) :-
+    bloqueo_duro(Reqs, Negados, _), !,
+    Estado = contradictorio,
+    confianza_estado(Estado, Confianza),
+    Competencia = [], Sugerencias = [].
 que_falta(Reqs, Negados, Estado, Confianza, Competencia, Sugerencias) :-
     preparar_requisitos(Reqs, V),
     preparar_requisitos(Negados, N),
@@ -1819,3 +1841,86 @@ mensaje_error_regla(persistencia(E), T) :-
    compuestos para Python. */
 tipo_resultado_regla(ok(_), ok).
 tipo_resultado_regla(error(_), error).
+
+/* ==========================================================================
+   SECCION 10. CONTRADICCIONES EN LA ENTRADA
+   Antes de recomendar se revisa que los requisitos no se contradigan.
+   - dura   : la entrada es imposible. BLOQUEA: diagnosticar_arquitectura/9
+              y que_falta/6 no dan recomendacion (ver sus primeras clausulas).
+   - tension: la entrada es posible pero costosa o arriesgada. Solo ADVIERTE:
+              el diagnostico se calcula igual.
+   Los mensajes van sin tildes, como el resto de la base (la interfaz las
+   agrega al mostrarlos).
+   ========================================================================== */
+
+/* --- 10.1 Hechos: contradiccion(ReqA, ReqB, Tipo, Mensaje) ---------------
+   Cada par se escribe UNA sola vez: conflicto/6 busca los dos requisitos
+   con memberchk/2, asi que el orden en que los marco el usuario no importa.
+   La primera clausula reutiliza excluyentes/2 (seccion 1.11), de modo que un
+   par excluyente nuevo se vuelve contradiccion dura sin tocar esta seccion.
+   excluyentes/2 liga A y B antes de format/3. */
+contradiccion(A, B, dura, Mensaje) :-
+    excluyentes(A, B),
+    format(atom(Mensaje),
+           'Contradiccion: ~w y ~w son excluyentes; el proyecto no puede tener los dos.',
+           [A, B]).
+contradiccion(latencia_critica, procesos_largos, dura,
+    'Contradiccion: latencia_critica exige responder en milisegundos y procesos_largos implica tareas de varios minutos.').
+contradiccion(disponibilidad_alta, presupuesto_bajo, tension,
+    'Tension: disponibilidad_alta (24/7, redundancia) suele costar mas de lo que permite presupuesto_bajo.').
+contradiccion(consistencia_estricta, integracion_asincrona, tension,
+    'Tension: integracion_asincrona por mensajes da consistencia eventual, lo que dificulta consistencia_estricta.').
+
+/* --- 10.2 conflicto(+V, +N, -A, -B, -Tipo, -Mensaje) ---------------------
+   V = requisitos afirmados y N = negados ("no aplica"), ya validados.
+   1a clausula: un par de 10.1 con los dos requisitos presentes en V.
+   2a clausula (dura): el mismo requisito esta afirmado y negado a la vez.
+   member/2 recorre V (puede haber varios); memberchk/2 solo comprueba,
+   porque N no tiene repetidos y basta una coincidencia.
+   Sin cortes: findall/3 necesita TODAS las soluciones. */
+conflicto(V, _, A, B, Tipo, Mensaje) :-
+    contradiccion(A, B, Tipo, Mensaje),
+    memberchk(A, V),
+    memberchk(B, V).
+conflicto(V, N, R, R, dura, Mensaje) :-
+    member(R, V),
+    memberchk(R, N),
+    format(atom(Mensaje),
+           'Contradiccion: ~w esta marcado como requisito y tambien como "no aplica".',
+           [R]).
+
+/* --- 10.3 contradicciones(+Reqs, +Negados, -Lista) -----------------------
+   PREDICADO NUEVO. Lista = [[A, B, Tipo, Mensaje], ...] (lista de listas,
+   facil de leer en Python). Pasa por preparar_requisitos/2 como los demas
+   predicados que llama Python: minusculas, sin repetidos, sin desconocidos.
+   Sin contradicciones -> []. findall/3 nunca falla. */
+contradicciones(Reqs, Negados, Lista) :-
+    preparar_requisitos(Reqs, V),
+    preparar_requisitos(Negados, N),
+    findall([A, B, Tipo, M], conflicto(V, N, A, B, Tipo, M), Lista).
+
+/* --- 10.4 consistencia_entrada(+Reqs, +Negados, -Estado, -Lista) ---------
+   PREDICADO NUEVO. Estado = bloqueado | advertencia | consistente. */
+consistencia_entrada(Reqs, Negados, Estado, Lista) :-
+    contradicciones(Reqs, Negados, Lista),
+    estado_consistencia(Lista, Estado).
+
+/* estado_consistencia(+Lista, -Estado): la PRIMERA clausula que se cumple
+   decide. Los cortes hacen las clausulas excluyentes: si hay una dura no se
+   debe responder tambien 'advertencia' al pedir otra solucion. La ultima es
+   el caso general (sin contradicciones). Se compara con \== en vez de \+
+   porque Lista ya esta ligada: basta comparar terminos. */
+estado_consistencia(Lista, bloqueado) :-
+    memberchk([_, _, dura, _], Lista), !.
+estado_consistencia(Lista, advertencia) :-
+    Lista \== [], !.
+estado_consistencia(_, consistente).
+
+/* --- 10.5 bloqueo_duro(+Reqs, +Negados, -Mensajes) -----------------------
+   Tiene exito solo si hay al menos una contradiccion dura; Mensajes son
+   sus textos. Lo usan las primeras clausulas de diagnosticar_arquitectura/9
+   (con Negados = [], porque su firma no recibe negados) y de que_falta/6. */
+bloqueo_duro(Reqs, Negados, Mensajes) :-
+    contradicciones(Reqs, Negados, Lista),
+    findall(M, member([_, _, dura, M], Lista), Mensajes),
+    Mensajes \== [].
