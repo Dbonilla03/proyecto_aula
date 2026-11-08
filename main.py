@@ -18,11 +18,13 @@ Este programa es la implementación de caja blanca (Entregable 2):
 import os
 import re
 import sys
+import hmac
 import json
+import hashlib
 from datetime import datetime
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 from tkinter import font as tkfont
 
 # ===========================================================================
@@ -31,6 +33,23 @@ from tkinter import font as tkfont
 CARPETA_PROYECTO = os.path.dirname(os.path.abspath(__file__))
 RUTA_BASE_CONOCIMIENTO = os.path.join(CARPETA_PROYECTO, "base_conocimiento.pl")
 RUTA_HISTORIAL = os.path.join(CARPETA_PROYECTO, "historial_evaluaciones.json")
+
+# Control de acceso del Modo Experto (DEMOSTRACIÓN, no es seguridad real: el
+# hash está en el código y cualquiera con acceso al archivo puede cambiarlo).
+# sha256("experto2026"). La variable de entorno ARQUISELECT_PIN lo reemplaza.
+PIN_EXPERTO_SHA256 = "4c1f262f6be6d62444f693baf98a639df268b734fd1464056d397d43691465f2"
+
+
+def _sha256(texto):
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()
+
+
+def pin_valido(pin):
+    """True si el PIN coincide con ARQUISELECT_PIN (si está definida) o con el
+    hash por defecto. compare_digest evita comparar carácter por carácter."""
+    esperado = os.environ.get("ARQUISELECT_PIN")
+    esperado = _sha256(esperado) if esperado else PIN_EXPERTO_SHA256
+    return hmac.compare_digest(_sha256(pin or ""), esperado)
 
 # Tipografía del sistema
 FUENTE_BASE = "Segoe UI"
@@ -193,9 +212,12 @@ def a_python(valor):
 class PuenteProlog:
     """Encapsula todas las consultas a base_conocimiento.pl."""
 
-    def __init__(self, ruta=RUTA_BASE_CONOCIMIENTO):
+    def __init__(self, ruta=RUTA_BASE_CONOCIMIENTO, ruta_aprendizaje=None):
+        """ruta_aprendizaje: archivo de aprendizaje alternativo (las pruebas usan
+        uno temporal para no tocar conocimiento_aprendido.pl)."""
         from pyswip import Prolog # type: ignore
         self.ruta = ruta.replace("\\", "/")
+        self.ruta_aprendizaje = ruta_aprendizaje.replace("\\", "/") if ruta_aprendizaje else None
         self.prolog = Prolog()
         self.ultimas_metas = {}
         self.estado_aprendizaje = ("sin_archivo", 0)
@@ -208,6 +230,8 @@ class PuenteProlog:
         conocimiento_aprendido.pl. catch/3: la primera vez el predicado aún no existe."""
         self.consultar("catch(olvidar_aprendizaje, _, true)")
         self.prolog.consult(self.ruta)
+        if self.ruta_aprendizaje:
+            self.consultar(f"usar_archivo_aprendizaje({atomo(self.ruta_aprendizaje)})")
         r = self.una_solucion(
             "aprendizaje",
             "ruta_aprendizaje(Ruta), cargar_aprendizaje(Ruta, Estado), "
@@ -286,6 +310,78 @@ class PuenteProlog:
     def estilos_aprendidos(self):
         return [(i, n) for i, n in self._lista("aprendidos", "estilos_aprendidos(Lista)")]
 
+    # --- Explicabilidad (sección 5) ---
+    def explicar(self, requisitos):
+        """explicar_diagnostico/5: reglas disparadas, hechos validados e
+        hipótesis descartadas, tal como las arma Prolog."""
+        meta = (f"explicar_diagnostico({lista_prolog(requisitos)}, "
+                "Mejor, Reglas, Hechos, Descartadas)")
+        return self.una_solucion("explicacion", meta)
+
+    def reglas_disparadas(self, requisitos):
+        """[[Id, Estilo, Efecto, Peso, Explicacion], ...] reglas expertas que se
+        disparan con esos requisitos."""
+        return self._lista("disparadas",
+                           f"reglas_expertas_disparadas({lista_prolog(requisitos)}, Lista)")
+
+    # --- Lenguaje natural (lenguaje_natural.pl, entregable 3) ---
+    def interpretar(self, texto):
+        """interpretar_texto/5. Devuelve {requisitos, negados, no_entendido,
+        arbol}; arbol son las líneas con sangría que arma arbol_lineas/2."""
+        meta = (f"interpretar_texto({atomo(texto)}, Requisitos, Negados, NoEntendido, _Arbol), "
+                "arbol_lineas(_Arbol, Lineas)")
+        r = self.una_solucion("interpretar", meta)
+        if not r:
+            return {"requisitos": [], "negados": [], "no_entendido": [], "arbol": []}
+        return {"requisitos": r["Requisitos"], "negados": r["Negados"],
+                "no_entendido": [str(p) for p in r["NoEntendido"]], "arbol": r["Lineas"]}
+
+    def ensenar_sinonimo(self, frase, requisito, polaridad="afirma"):
+        meta = (f"ensenar_sinonimo({atomo(frase)}, {atomo(requisito)}, {atomo(polaridad)}, R), "
+                "mensaje_sinonimo(R, Mensaje), ( R = ok(_) -> Tipo = ok ; Tipo = error )")
+        r = self.una_solucion("sinonimo", meta)
+        if not r:
+            return {"tipo": "error", "mensaje": "Prolog no respondio a ensenar_sinonimo/4."}
+        return {"tipo": r["Tipo"], "mensaje": r["Mensaje"]}
+
+    def olvidar_sinonimo(self, frase):
+        return self.una_solucion("olvidar_sinonimo", f"olvidar_sinonimo({atomo(frase)})") is not None
+
+    def sinonimos_aprendidos(self):
+        return self._lista("sinonimos", "sinonimos_aprendidos(Lista)")
+
+    def formulaciones(self, requisito):
+        return self._lista("formulaciones", f"formulaciones({atomo(requisito)}, Lista)")
+
+    # --- Modo Experto: reglas inyectadas (sección 9) ---
+    def ensenar_regla(self, id_regla, explicacion, estilo, efecto, peso, condiciones, exclusiones):
+        """Envía SOLO datos a ensenar_regla/8; Prolog valida, construye la
+        cláusula, hace assertz y la escribe en el archivo de aprendizaje."""
+        try:
+            peso_txt = str(int(peso))
+        except (TypeError, ValueError):
+            peso_txt = atomo(peso)          # Prolog lo rechaza como peso_invalido
+        meta = (f"ensenar_regla({atomo(id_regla)}, {atomo(explicacion)}, {atomo(estilo)}, "
+                f"{atomo(efecto)}, {peso_txt}, {lista_prolog(condiciones)}, "
+                f"{lista_prolog(exclusiones)}, R), tipo_resultado_regla(R, Tipo), "
+                "mensaje_regla(R, Mensaje), "
+                "( R = ok(Id) -> clausula_regla_texto(Id, Clausula) ; Id = '', Clausula = '' )")
+        r = self.una_solucion("ensenar_regla", meta)
+        if not r:
+            return {"tipo": "error", "id": "", "clausula": "",
+                    "mensaje": "Prolog no respondio a ensenar_regla/8."}
+        return {"tipo": r["Tipo"], "id": r["Id"], "mensaje": r["Mensaje"],
+                "clausula": r["Clausula"]}
+
+    def olvidar_regla(self, id_regla):
+        return self.una_solucion("olvidar_regla", f"olvidar_regla({atomo(id_regla)})") is not None
+
+    def reglas_aprendidas(self):
+        """[{id, estilo, efecto, peso, condiciones, exclusiones, explicacion}, ...]"""
+        return [{"id": i, "estilo": e, "efecto": ef, "peso": p, "condiciones": c,
+                 "exclusiones": x, "explicacion": ex}
+                for i, e, ef, p, c, x, ex in self._lista("reglas", "reglas_aprendidas(Lista)")]
+
 
 # ===========================================================================
 # 4. GESTOR DE HISTORIAL (Persistencia JSON en disco)
@@ -350,6 +446,13 @@ def construir_encabezado(padre, titulo, subtitulo, accion_derecha=None, texto_ac
 
     if accion_derecha and texto_accion:
         ttk.Button(fila, text=texto_accion, style="HeaderNav.TButton", command=accion_derecha).pack(side="right", padx=4)
+
+    # Rol actual (Usuario / Experto); el controlador lo actualiza al cambiar.
+    controlador = getattr(padre, "controlador", None)
+    if controlador is not None and hasattr(controlador, "registrar_etiqueta_rol"):
+        lbl_rol = tk.Label(fila, text="", font=(FUENTE_BASE, 8, "bold"), padx=10, pady=3)
+        lbl_rol.pack(side="right", padx=(4, 10))
+        controlador.registrar_etiqueta_rol(lbl_rol)
 
     # Divisor inferior sutil de 1px
     divisor = tk.Frame(padre, bg="#1e293b", height=1)
@@ -474,9 +577,21 @@ class VistaInicio(ttk.Frame):
             justify="center"
         ).pack(pady=(0, 24))
 
-        # Cuadrícula de 3 Tarjetas de Acción Minimalistas
+        # Selector de rol: Usuario / Experto (Experto pide PIN)
+        fila_rol = tk.Frame(caja_centro, bg=COLOR_FONDO)
+        fila_rol.pack(pady=(0, 18))
+        tk.Label(fila_rol, text="ROL:", font=(FUENTE_BASE, 9, "bold"), bg=COLOR_FONDO,
+                 fg=COLOR_TEXTO_MUTED).pack(side="left", padx=(0, 8))
+        self.var_rol = tk.StringVar(value=controlador.rol)
+        for valor, texto in (("usuario", "👤 Usuario"), ("experto", "🛡 Experto")):
+            ttk.Radiobutton(fila_rol, text=texto, value=valor, variable=self.var_rol,
+                            style="Rol.TRadiobutton",
+                            command=self._al_cambiar_rol).pack(side="left", padx=4)
+
+        # Cuadrícula de Tarjetas de Acción Minimalistas
         fila_tarjetas = tk.Frame(caja_centro, bg=COLOR_FONDO)
         fila_tarjetas.pack()
+        self.fila_tarjetas = fila_tarjetas
 
         tarjetas_info = [
             {
@@ -511,6 +626,18 @@ class VistaInicio(ttk.Frame):
                 "btn_texto": "Recargar .pl",
                 "btn_estilo": "Suave.TButton",
                 "comando": controlador.recargar_kb
+            },
+            {
+                "icono": "🧠",
+                "tag": "SOLO EXPERTO",
+                "tag_bg": COLOR_AMBAR_BG,
+                "tag_fg": COLOR_AMBAR_TEXT,
+                "titulo": "Modo Experto",
+                "desc": "Enseñe reglas lógicas, arquitecturas nuevas y vocabulario. Se agregan con assertz y quedan guardados en disco.",
+                "btn_texto": "Abrir Modo Experto →",
+                "btn_estilo": "Secundario.TButton",
+                "comando": lambda: controlador.abrir_modo_experto(0),
+                "experto": True,
             }
         ]
 
@@ -526,8 +653,11 @@ class VistaInicio(ttk.Frame):
                 width=270,
                 height=260
             )
-            card.pack(side="left", padx=10)
             card.pack_propagate(False)
+            if info.get("experto"):
+                self.card_experto = card       # se muestra solo con rol Experto
+            else:
+                card.pack(side="left", padx=10)
 
             top_card = tk.Frame(card, bg=COLOR_TARJETA)
             top_card.pack(fill="x", pady=(0, 10))
@@ -585,6 +715,18 @@ class VistaInicio(ttk.Frame):
                 fg=COLOR_GRIS
             ).pack(side="left", padx=12)
 
+    def _al_cambiar_rol(self):
+        """El controlador pide el PIN; si falla, el selector vuelve a Usuario."""
+        self.controlador.cambiar_rol(self.var_rol.get())
+        self.actualizar_rol()
+
+    def actualizar_rol(self):
+        self.var_rol.set(self.controlador.rol)
+        if self.controlador.rol == "experto":
+            self.card_experto.pack(side="left", padx=10)
+        else:
+            self.card_experto.pack_forget()
+
 
 # ---------------------------------------------------------------------------
 # 6.2 VISTA: EVALUACIÓN PRINCIPAL (Caja Blanca)
@@ -603,6 +745,14 @@ class VistaEvaluacion(ttk.Frame):
         self.negados = []
         self.respuestas = []   # [(requisito, aplica)] en orden de respuesta
         self._filas_comp = []
+        # Lo que marcó la última interpretación en lenguaje natural: al
+        # interpretar de nuevo se reemplaza (no se acumula).
+        self._nl_requisitos = []
+        self._nl_negados = []
+        self._nl_arbol = []
+        self._ultima_explicacion = None
+        self._reglas_disparadas = []
+        self._porque_abierto = False
 
         # Encabezado
         construir_encabezado(
@@ -624,6 +774,33 @@ class VistaEvaluacion(ttk.Frame):
         col = ttk.Frame(padre, style="Fondo.TFrame", width=360)
         col.pack(side="left", fill="y", padx=(0, 12))
         col.pack_propagate(False)
+
+        # 0. Describe tu proyecto (lenguaje natural -> DCG en Prolog)
+        card_nl = tk.Frame(col, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
+                           highlightbackground=COLOR_PRIMARIO, padx=12, pady=10)
+        card_nl.pack(fill="x", pady=(0, 8))
+        tk.Label(card_nl, text="DESCRIBE TU PROYECTO", font=(FUENTE_BASE, 8, "bold"),
+                 bg=COLOR_TARJETA, fg=COLOR_PRIMARIO).pack(anchor="w", pady=(0, 4))
+        self.txt_nl = tk.Text(card_nl, height=4, wrap="word", font=(FUENTE_BASE, 9),
+                              relief="flat", bg=COLOR_SUPERFICIE, fg=COLOR_TEXTO,
+                              highlightthickness=1, highlightbackground=COLOR_BORDE,
+                              padx=6, pady=4)
+        self.txt_nl.pack(fill="x")
+        self.txt_nl.insert("1.0", "")
+        Tooltip(self.txt_nl, "Ej.: «Somos un equipo de tres personas con poco presupuesto "
+                             "y necesitamos entregar rápido». Prolog lo analiza con una DCG.")
+        fila_nl = tk.Frame(card_nl, bg=COLOR_TARJETA)
+        fila_nl.pack(fill="x", pady=(6, 0))
+        ttk.Button(fila_nl, text="🔎 Interpretar", style="Primario.TButton",
+                   command=self.interpretar_texto).pack(side="left")
+        self.lnk_arbol = tk.Label(fila_nl, text="Ver análisis sintáctico", font=(FUENTE_BASE, 9, "underline"),
+                                  bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED, cursor="hand2")
+        self.lnk_arbol.pack(side="right")
+        self.lnk_arbol.bind("<Button-1>", lambda _e: self.ver_analisis_sintactico())
+        self.lbl_nl_ok = tk.Label(card_nl, text="", font=(FUENTE_BASE, 9), bg=COLOR_TARJETA,
+                                  fg=COLOR_EXITO_TEXT, wraplength=320, justify="left")
+        self.lbl_nl_no = tk.Label(card_nl, text="", font=(FUENTE_BASE, 9), bg=COLOR_TARJETA,
+                                  fg=COLOR_AMBAR_TEXT, wraplength=320, justify="left")
 
         # 1. Tarjeta de Plantillas rápidas
         card_ej = tk.Frame(col, bg=COLOR_TARJETA, bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE, padx=12, pady=10)
@@ -677,7 +854,7 @@ class VistaEvaluacion(ttk.Frame):
                 chk.pack(anchor="w", pady=2)
                 Tooltip(chk, "¿" + con_tildes(r["pregunta"]))
 
-        # 3. Otros requisitos: enseñar una arquitectura nueva (VistaNuevaArquitectura)
+        # 3. Otros requisitos: enseñar una arquitectura nueva (Modo Experto, solo rol Experto)
         card_otros = tk.Frame(col, bg=COLOR_TARJETA, bd=0, highlightthickness=1, highlightbackground=COLOR_BORDE, padx=12, pady=10)
         card_otros.pack(fill="x", pady=(8, 0))
 
@@ -688,11 +865,11 @@ class VistaEvaluacion(ttk.Frame):
 
         btn_nueva = ttk.Button(
             card_otros, text="➕ Crear arquitectura nueva…", style="Secundario.TButton",
-            command=lambda: self.controlador.mostrar_vista("VistaNuevaArquitectura")
+            command=lambda: self.controlador.abrir_modo_experto(1)
         )
         btn_nueva.pack(fill="x")
-        Tooltip(btn_nueva, "Enseñe al sistema un estilo que no conoce eligiendo los requisitos "
-                           "que favorece. Se agrega a la base sin reiniciar.")
+        Tooltip(btn_nueva, "Requiere rol Experto: abre el Modo Experto en la pestaña "
+                           "«Arquitectura nueva». Se agrega a la base sin reiniciar.")
 
         # Botones de acción inferiores
         fila_acciones = ttk.Frame(col, style="Fondo.TFrame")
@@ -832,9 +1009,129 @@ class VistaEvaluacion(ttk.Frame):
         self.zona_descartes = tk.Frame(self.sec_descartes, bg=COLOR_TARJETA)
         self.zona_descartes.pack(fill="x")
 
-    def _linea(self, padre, texto, color):
-        tk.Label(padre, text=texto, font=(FUENTE_BASE, 10), bg=COLOR_TARJETA, fg=color,
-                 wraplength=760, justify="left").pack(anchor="w", padx=(12, 0), pady=1)
+        # 4) ¿Por qué? (auditoría): plegable, sale de explicar_diagnostico/5
+        self.sec_porque = tk.Frame(cuerpo, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
+                                   highlightbackground=COLOR_BORDE, padx=18, pady=10)
+        self.btn_porque = ttk.Button(self.sec_porque, text="▸ ¿Por qué? (auditoría)",
+                                     style="Suave.TButton", command=self.alternar_porque)
+        self.btn_porque.pack(anchor="w")
+        self.zona_porque = tk.Frame(self.sec_porque, bg=COLOR_TARJETA)
+
+    def _linea(self, padre, texto, color, negrita=False, tamano=10, sangria=12):
+        tk.Label(padre, text=texto, font=(FUENTE_BASE, tamano, "bold" if negrita else "normal"),
+                 bg=COLOR_TARJETA, fg=color,
+                 wraplength=760, justify="left").pack(anchor="w", padx=(sangria, 0), pady=1)
+
+    # --- Lenguaje natural ---
+    def interpretar_texto(self):
+        """Envía el texto a interpretar_texto/5 y aplica lo que Prolog entendió:
+        marca casillas, agrega negados y relanza las preguntas guiadas."""
+        texto = self.txt_nl.get("1.0", "end").strip()
+        if not texto:
+            self._mostrar_nl("", "Escribe una descripción del proyecto", COLOR_TEXTO_MUTED)
+            return
+        try:
+            r = self.puente.interpretar(texto)
+        except Exception as error:
+            messagebox.showerror("Error en Prolog", f"No se pudo interpretar el texto:\n{error}")
+            return
+
+        # Reemplazar lo que marcó la interpretación anterior (sin duplicar).
+        for req in self._nl_requisitos:
+            if req in self.vars:
+                self.vars[req].set(0)
+        self.negados = [n for n in self.negados if n not in self._nl_negados]
+        self.respuestas = [(q, a) for q, a in self.respuestas
+                           if q not in self._nl_requisitos and q not in self._nl_negados]
+
+        for req in r["requisitos"]:
+            if req in self.vars:
+                self.vars[req].set(1)
+        for req in r["negados"]:
+            if req not in self.negados:
+                self.negados.append(req)
+            self.respuestas.append((req, False))
+        self._nl_requisitos = list(r["requisitos"])
+        self._nl_negados = list(r["negados"])
+        self._nl_arbol = r["arbol"]
+
+        partes = [self.etiquetas.get(q, q) for q in r["requisitos"]]
+        partes += [f"NO: {self.etiquetas.get(q, q)}" for q in r["negados"]]
+        ok = ("✔ Entendí: " + "; ".join(partes)) if partes else "✔ Entendí: (ningún requisito)"
+        no = ("⚠ No entendí: " + ", ".join(r["no_entendido"])) if r["no_entendido"] else ""
+        self._mostrar_nl(ok, no, COLOR_EXITO_TEXT if partes else COLOR_TEXTO_MUTED)
+        self.pestanas.select(0)
+        self.recalcular()
+
+    def _mostrar_nl(self, ok, no, color_ok):
+        self.lbl_nl_ok.pack_forget()
+        self.lbl_nl_no.pack_forget()
+        if ok:
+            self.lbl_nl_ok.configure(text=ok, fg=color_ok)
+            self.lbl_nl_ok.pack(anchor="w", pady=(6, 0))
+        if no:
+            self.lbl_nl_no.configure(text=no)
+            self.lbl_nl_no.pack(anchor="w", pady=(2, 0))
+
+    def ver_analisis_sintactico(self):
+        """Muestra el árbol de la DCG (líneas con sangría armadas en Prolog)."""
+        ventana = tk.Toplevel(self)
+        ventana.title("Análisis sintáctico (DCG)")
+        ventana.geometry("620x480")
+        ventana.configure(bg=COLOR_FONDO)
+        tk.Label(ventana, text="Árbol devuelto por interpretar_texto/5 → arbol_lineas/2",
+                 font=(FUENTE_BASE, 10, "bold"), bg=COLOR_FONDO, fg=COLOR_TEXTO).pack(anchor="w", padx=12, pady=(10, 4))
+        txt = tk.Text(ventana, font=("Consolas", 10), bg=COLOR_TARJETA, fg=COLOR_TEXTO,
+                      relief="flat", padx=10, pady=8)
+        txt.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+        lineas = self._nl_arbol or ["(Todavía no hay análisis: escriba una descripción y pulse 🔎 Interpretar)"]
+        txt.insert("1.0", "\n".join(lineas))
+        txt.configure(state="disabled")
+        ttk.Button(ventana, text="Cerrar", style="Suave.TButton",
+                   command=ventana.destroy).pack(anchor="e", padx=12, pady=(0, 10))
+
+    # --- ¿Por qué? (auditoría) ---
+    def alternar_porque(self):
+        self._porque_abierto = not self._porque_abierto
+        self._dibujar_porque()
+
+    def _dibujar_porque(self):
+        flecha = "▾" if self._porque_abierto else "▸"
+        self.btn_porque.configure(text=f"{flecha} ¿Por qué? (auditoría)")
+        for h in self.zona_porque.winfo_children():
+            h.destroy()
+        if not self._porque_abierto or not self._ultima_explicacion:
+            self.zona_porque.pack_forget()
+            return
+        ex = self._ultima_explicacion
+        self.zona_porque.pack(fill="x", pady=(8, 0))
+        z = self.zona_porque
+
+        self._linea(z, "REGLAS DISPARADAS (encadenamiento nivel 1 → 2 → 3)", COLOR_PRIMARIO, True, 9, 0)
+        nombres_nivel = {1: "Nivel 1 · validación", 2: "Nivel 2 · inferencia intermedia", 3: "Nivel 3 · conclusión"}
+        nivel_actual = None
+        for nivel, regla, detalle in ex["Reglas"]:
+            if nivel != nivel_actual:
+                nivel_actual = nivel
+                self._linea(z, nombres_nivel.get(nivel, f"Nivel {nivel}"), COLOR_TEXTO, True, 9, 4)
+            experta = str(regla).startswith("regla_experta")
+            color = COLOR_AMBAR_TEXT if experta else COLOR_TEXTO_MUTED
+            self._linea(z, f"{'★' if experta else '•'} {regla}: {detalle}", color, experta, 9, 16)
+
+        self._linea(z, "HECHOS VALIDADOS", COLOR_PRIMARIO, True, 9, 0)
+        if not ex["Hechos"]:
+            self._linea(z, "• (ninguno)", COLOR_TEXTO_MUTED, False, 9, 16)
+        for req, grupo, atributo in ex["Hechos"]:
+            self._linea(z, f"• {self.etiquetas.get(req, req)}  →  grupo {grupo}, exige {bonito(atributo)}",
+                        COLOR_EXITO_TEXT, False, 9, 16)
+
+        self._linea(z, "HIPÓTESIS DESCARTADAS", COLOR_PRIMARIO, True, 9, 0)
+        if not ex["Descartadas"]:
+            self._linea(z, "• (ninguna)", COLOR_TEXTO_MUTED, False, 9, 16)
+        for estilo, tipo, detalle, comparte in ex["Descartadas"]:
+            extra = f" · compartía: {', '.join(bonito(a) for a in comparte)}" if comparte else ""
+            self._linea(z, f"✖ {self.nombre_estilo(estilo)} ({bonito(tipo)}): {detalle}{extra}",
+                        COLOR_PELIGRO_TEXT, False, 9, 16)
 
     # --- Acciones y sincronización ---
     def al_mostrar(self):
@@ -859,6 +1156,8 @@ class VistaEvaluacion(ttk.Frame):
             v.set(1 if r in reqs else 0)
         self.negados = []
         self.respuestas = []
+        self._nl_requisitos = []
+        self._nl_negados = []
         self.pestanas.select(0)
         self.recalcular()
 
@@ -905,6 +1204,8 @@ class VistaEvaluacion(ttk.Frame):
             rs = self.puente.resumen(reqs)
             cands = self.puente.candidatos(reqs)
             descs = self.puente.descartes(reqs)
+            self._ultima_explicacion = self.puente.explicar(reqs)
+            self._reglas_disparadas = self.puente.reglas_disparadas(reqs)
         except Exception as error:
             messagebox.showerror("Error en Prolog", f"Ocurrió un error al consultar SWI-Prolog:\n{error}")
             return
@@ -915,6 +1216,7 @@ class VistaEvaluacion(ttk.Frame):
         self._mostrar_dictamen(d, qf)
         self._mostrar_preguntas(d, qf)
         self._mostrar_resumen(d, qf, rs, cands, descs)
+        self._dibujar_porque()
 
     def guardar_en_historial(self):
         reqs = self.seleccion()
@@ -1059,7 +1361,8 @@ class VistaEvaluacion(ttk.Frame):
             filas.append((estilo, puntaje, rol))
         self._filas_comp = filas
 
-        for sec in (self.sec_vacio, self.sec_respuesta, self.sec_comp, self.sec_descartes):
+        for sec in (self.sec_vacio, self.sec_respuesta, self.sec_comp, self.sec_descartes,
+                    self.sec_porque):
             sec.pack_forget()
 
         if qf["Estado"] == "vacio":
@@ -1082,6 +1385,10 @@ class VistaEvaluacion(ttk.Frame):
             self._linea(self.zona_razones, f"✔ Favorece {con_tildes(bonito(atributo))} (+{peso}) debido a: {causas}", COLOR_EXITO_TEXT)
         for req, peso in rs["EnContra"]:
             self._linea(self.zona_razones, f"✖ Penalizado con -{peso} puntos por: {self.etiquetas.get(req, req)}", COLOR_PELIGRO_TEXT)
+        for id_regla, estilo, efecto, peso, expl in self._reglas_disparadas:
+            if estilo == rs["Mejor"] and efecto == "recomendar":
+                self._linea(self.zona_razones, f"★ Regla experta {id_regla} (+{peso}): {expl}",
+                            COLOR_AMBAR_TEXT, True)
         self.sec_respuesta.pack(fill="x", pady=(0, 12), padx=(0, 4))
 
         # 2) Comparativa
@@ -1091,14 +1398,21 @@ class VistaEvaluacion(ttk.Frame):
         # 3) Descartados (solo si hay)
         for h in self.zona_descartes.winfo_children():
             h.destroy()
+        explicaciones = {r[0]: r[4] for r in self._reglas_disparadas}
         for estilo, tipo, motivo in descs:
             if tipo == "exclusion":
                 txt = f"✖ {self.nombre_estilo(estilo)}: incompatible con «{self.etiquetas.get(motivo, motivo)}»"
+            elif tipo == "regla_experta":
+                txt = (f"✖ {self.nombre_estilo(estilo)}: descartado por la regla experta «{motivo}»: "
+                       f"{explicaciones.get(motivo, '')}")
             else:
                 txt = f"✖ {self.nombre_estilo(estilo)}: sin evidencia a favor (puntaje {motivo})"
             self._linea(self.zona_descartes, txt, COLOR_PELIGRO_TEXT)
         if descs:
-            self.sec_descartes.pack(fill="x", padx=(0, 4))
+            self.sec_descartes.pack(fill="x", padx=(0, 4), pady=(0, 12))
+
+        # 4) ¿Por qué? (auditoría)
+        self.sec_porque.pack(fill="x", padx=(0, 4))
 
     def _dibujar_barra_pildora(self, canvas, x1, y1, x2, y2, radio, color):
         """Dibuja una barra con extremos redondeados en el canvas."""
@@ -1172,56 +1486,60 @@ class VistaEvaluacion(ttk.Frame):
 
 
 # ---------------------------------------------------------------------------
-# 6.3 VISTA: CREAR ARQUITECTURA NUEVA (aprendizaje en caliente)
+# 6.3 PANEL: CREAR ARQUITECTURA NUEVA (pestaña 2 del Modo Experto)
 # ---------------------------------------------------------------------------
-class VistaNuevaArquitectura(ttk.Frame):
-    """Formulario para enseñar un estilo nuevo. Python solo reúne lo marcado y
-    lo envía a ensenar_estilo/6; Prolog valida, lo traduce a hechos aporta/3 e
-    incompatible/2 y responde con el mensaje que aquí se muestra."""
+def _tarjeta(padre, **kw):
+    return tk.Frame(padre, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
+                    highlightbackground=COLOR_BORDE, **kw)
+
+
+def _titulo(padre, texto, color=COLOR_TEXTO_MUTED):
+    return tk.Label(padre, text=texto, font=(FUENTE_BASE, 8, "bold"),
+                    bg=COLOR_TARJETA, fg=color)
+
+
+def _pintar_mensaje(etiqueta, texto, tipo):
+    colores = {
+        "exito": (COLOR_EXITO_BG, COLOR_EXITO_TEXT),
+        "advertencia": (COLOR_AMBAR_BG, COLOR_AMBAR_TEXT),
+        "error": (COLOR_PELIGRO_BG, COLOR_PELIGRO_TEXT),
+    }
+    bg_c, fg_c = colores.get(tipo, (COLOR_FONDO, COLOR_TEXTO))
+    etiqueta.configure(text=texto, bg=bg_c, fg=fg_c)
+
+
+def _etiqueta_mensaje(padre):
+    lbl = tk.Label(padre, text="", font=(FUENTE_BASE, 9), anchor="w",
+                   justify="left", padx=12, pady=6, bg=COLOR_FONDO)
+    lbl.bind("<Configure>", lambda e: lbl.configure(wraplength=max(e.width - 24, 200)))
+    return lbl
+
+
+class PanelArquitecturaNueva(ttk.Frame):
+    """Formulario para enseñar un estilo nuevo (antes VistaNuevaArquitectura).
+    Python solo reúne lo marcado y lo envía a ensenar_estilo/6; Prolog valida,
+    lo traduce a hechos aporta/3 e incompatible/2 y responde con el mensaje
+    que aquí se muestra."""
 
     def __init__(self, padre, controlador):
-        super().__init__(padre, style="Fondo.TFrame")
+        super().__init__(padre, style="Fondo.TFrame", padding=(6, 8, 6, 6))
         self.controlador = controlador
         self.puente = controlador.puente
         self.requisitos = self.puente.requisitos_disponibles()
         self.filas = {}   # requisito -> (var_favorece, var_peso, var_incompatible, combo_peso)
 
-        construir_encabezado(
-            self,
-            "➕ Crear Arquitectura Nueva",
-            "Enseñe al sistema experto un estilo nuevo eligiendo qué requisitos favorece y con cuáles es incompatible",
-            accion_derecha=lambda: controlador.mostrar_vista("VistaEvaluacion"),
-            texto_accion="⬅ Volver a la evaluación"
-        )
-
-        cuerpo = ttk.Frame(self, style="Fondo.TFrame", padding=(18, 12, 18, 12))
-        cuerpo.pack(fill="both", expand=True)
-
-        self._construir_datos(cuerpo)
-        # Lo de abajo se empaqueta desde el fondo para que la lista de
-        # requisitos tome todo el espacio libre del medio.
-        self._construir_aprendidas(cuerpo)
-        self._construir_acciones(cuerpo)
-        self._construir_requisitos(cuerpo)
-        self.refrescar_aprendidas()
-
-    # --- Construcción ---
-    def _tarjeta(self, padre, **kw):
-        return tk.Frame(padre, bg=COLOR_TARJETA, bd=0, highlightthickness=1,
-                        highlightbackground=COLOR_BORDE, **kw)
-
-    def _titulo(self, padre, texto, color=COLOR_TEXTO_MUTED):
-        return tk.Label(padre, text=texto, font=(FUENTE_BASE, 8, "bold"),
-                        bg=COLOR_TARJETA, fg=color)
+        self._construir_datos(self)
+        self._construir_acciones(self)
+        self._construir_requisitos(self)
 
     def _construir_datos(self, padre):
-        card = self._tarjeta(padre, padx=14, pady=10)
+        card = _tarjeta(padre, padx=14, pady=10)
         card.pack(fill="x", side="top", pady=(0, 8))
         card.grid_columnconfigure(0, weight=1)
         card.grid_columnconfigure(1, weight=2)
 
-        self._titulo(card, "NOMBRE DE LA ARQUITECTURA").grid(row=0, column=0, sticky="w")
-        self._titulo(card, "DESCRIPCIÓN CORTA (OPCIONAL)").grid(row=0, column=1, sticky="w", padx=(12, 0))
+        _titulo(card, "NOMBRE DE LA ARQUITECTURA").grid(row=0, column=0, sticky="w")
+        _titulo(card, "DESCRIPCIÓN CORTA (OPCIONAL)").grid(row=0, column=1, sticky="w", padx=(12, 0))
         self.var_nombre = tk.StringVar()
         self.var_desc = tk.StringVar()
         ttk.Entry(card, textvariable=self.var_nombre, font=(FUENTE_BASE, 10)).grid(
@@ -1238,21 +1556,19 @@ class VistaNuevaArquitectura(ttk.Frame):
             grupos.setdefault(r["grupo"], []).append(r)
 
         for grupo, items in grupos.items():
-            marco = self._tarjeta(panel.interior, padx=12, pady=8)
+            marco = _tarjeta(panel.interior, padx=12, pady=8)
             marco.pack(fill="x", pady=4, padx=(0, 4))
             # Columnas de ancho fijo junto a la etiqueta; la columna 4 vacía
-            # absorbe el espacio sobrante para que en pantallas anchas las
-            # casillas no queden lejos del requisito.
+            # absorbe el espacio sobrante.
             marco.grid_columnconfigure(0, minsize=400)
             for col, ancho in ((1, 90), (2, 80), (3, 110)):
                 marco.grid_columnconfigure(col, minsize=ancho)
             marco.grid_columnconfigure(4, weight=1)
 
-            # Cabecera del grupo con los títulos de columna alineados
-            self._titulo(marco, NOMBRE_GRUPO.get(grupo, bonito(grupo)).upper()).grid(
+            _titulo(marco, NOMBRE_GRUPO.get(grupo, bonito(grupo)).upper()).grid(
                 row=0, column=0, sticky="w", pady=(0, 4))
             for col, txt in ((1, "FAVORECE"), (2, "PESO"), (3, "INCOMPATIBLE")):
-                self._titulo(marco, txt).grid(row=0, column=col, pady=(0, 4))
+                _titulo(marco, txt).grid(row=0, column=col, pady=(0, 4))
 
             for fila, r in enumerate(items, start=1):
                 req = r["id"]
@@ -1286,27 +1602,8 @@ class VistaNuevaArquitectura(ttk.Frame):
         ttk.Button(fila, text="💾 Guardar arquitectura", style="Primario.TButton",
                    command=self.guardar).pack(side="right")
 
-        self.lbl_mensaje = tk.Label(zona, text="", font=(FUENTE_BASE, 9), anchor="w",
-                                    justify="left", padx=12, pady=6, bg=COLOR_FONDO)
+        self.lbl_mensaje = _etiqueta_mensaje(zona)
         self.lbl_mensaje.pack(fill="x", pady=(8, 0))
-        self.lbl_mensaje.bind("<Configure>",
-                              lambda e: self.lbl_mensaje.configure(wraplength=max(e.width - 24, 200)))
-
-    def _construir_aprendidas(self, padre):
-        card = self._tarjeta(padre, padx=14, pady=10)
-        card.pack(fill="x", side="bottom", pady=(8, 0))
-        self._titulo(card, "ARQUITECTURAS APRENDIDAS", COLOR_PRIMARIO).pack(anchor="w", pady=(0, 4))
-
-        panel = PanelDesplazable(card)
-        panel.pack(fill="x")
-        panel.canvas.configure(height=110)
-        for w in (panel, panel.canvas, panel.interior):
-            w.configure(bg=COLOR_TARJETA)
-        self.zona_aprendidas = panel.interior
-
-    # --- Interacción ---
-    def al_mostrar(self):
-        self.refrescar_aprendidas()
 
     def _al_marcar(self, req, columna):
         """Favorece e Incompatible son excluyentes en la misma fila; el peso solo
@@ -1319,7 +1616,7 @@ class VistaNuevaArquitectura(ttk.Frame):
         combo.configure(state="readonly" if var_fav.get() else "disabled")
 
     def seleccionar_todo(self):
-        for req, (var_fav, _peso, var_inc, combo) in self.filas.items():
+        for var_fav, _peso, var_inc, combo in self.filas.values():
             var_fav.set(1)
             var_inc.set(0)
             combo.configure(state="readonly")
@@ -1331,15 +1628,6 @@ class VistaNuevaArquitectura(ttk.Frame):
             var_peso.set("2")
             combo.configure(state="disabled")
 
-    def _mensaje(self, texto, tipo):
-        colores = {
-            "exito": (COLOR_EXITO_BG, COLOR_EXITO_TEXT),
-            "advertencia": (COLOR_AMBAR_BG, COLOR_AMBAR_TEXT),
-            "error": (COLOR_PELIGRO_BG, COLOR_PELIGRO_TEXT),
-        }
-        bg_c, fg_c = colores.get(tipo, (COLOR_FONDO, COLOR_TEXTO))
-        self.lbl_mensaje.configure(text=texto, bg=bg_c, fg=fg_c)
-
     def guardar(self):
         favorece = [(req, var_peso.get()) for req, (var_fav, var_peso, _i, _c) in self.filas.items()
                     if var_fav.get()]
@@ -1348,11 +1636,11 @@ class VistaNuevaArquitectura(ttk.Frame):
             res = self.puente.ensenar_estilo(self.var_nombre.get(), self.var_desc.get(),
                                              favorece, incompatibles)
         except Exception as error:
-            self._mensaje(f"Error al consultar SWI-Prolog: {error}", "error")
+            _pintar_mensaje(self.lbl_mensaje, f"Error al consultar SWI-Prolog: {error}", "error")
             return
 
         if res["tipo"] != "ok":
-            self._mensaje("✖ " + con_tildes(res["mensaje"]), "error")
+            _pintar_mensaje(self.lbl_mensaje, "✖ " + con_tildes(res["mensaje"]), "error")
             return
 
         texto = "✔ " + con_tildes(res["mensaje"])
@@ -1362,48 +1650,368 @@ class VistaNuevaArquitectura(ttk.Frame):
             texto += f"\n⚠ Quedó en memoria, pero no se pudo escribir en disco: {error}"
         for adv in res["advertencias"]:
             texto += "\n⚠ " + con_tildes(adv)
-        self._mensaje(texto, "advertencia" if res["advertencias"] else "exito")
+        _pintar_mensaje(self.lbl_mensaje, texto, "advertencia" if res["advertencias"] else "exito")
 
         self.var_nombre.set("")
         self.var_desc.set("")
         self.limpiar_seleccion()
         self.controlador.conocimiento_actualizado()
 
-    def eliminar(self, id_estilo, nombre):
-        if not messagebox.askyesno(
-                "Confirmar",
-                f"¿Eliminar la arquitectura «{nombre}» ({id_estilo})?\n"
-                "Se borrará de la base de conocimiento y del archivo de aprendizaje."):
+
+# ---------------------------------------------------------------------------
+# 6.3b VISTA: MODO EXPERTO (adquisición de conocimiento en caliente)
+# ---------------------------------------------------------------------------
+class VistaModoExperto(ttk.Frame):
+    """Solo accesible con rol Experto. Cuatro pestañas: regla nueva,
+    arquitectura nueva, vocabulario del DCG y conocimiento aprendido.
+    Toda validación y construcción de cláusulas ocurre en Prolog: aquí solo se
+    reúnen los datos del formulario y se muestra la respuesta."""
+
+    def __init__(self, padre, controlador):
+        super().__init__(padre, style="Fondo.TFrame")
+        self.controlador = controlador
+        self.puente = controlador.puente
+        self.requisitos = self.puente.requisitos_disponibles()
+        self.ids_req = [r["id"] for r in self.requisitos]
+        self.etiquetas = {r["id"]: con_tildes(r["etiqueta"]) for r in self.requisitos}
+        self.estilos = {}
+
+        construir_encabezado(
+            self,
+            "🧠 Modo Experto",
+            "Adquisición de conocimiento en caliente: reglas lógicas, arquitecturas y vocabulario (assertz + archivo .pl)",
+            accion_derecha=lambda: controlador.mostrar_vista("VistaInicio"),
+            texto_accion="⬅ Volver al Inicio"
+        )
+
+        cuerpo = ttk.Frame(self, style="Fondo.TFrame", padding=(18, 12, 18, 12))
+        cuerpo.pack(fill="both", expand=True)
+        self.pestanas = ttk.Notebook(cuerpo)
+        self.pestanas.pack(fill="both", expand=True)
+
+        self._pestana_regla()
+        tab_arq = ttk.Frame(self.pestanas, padding=6)
+        self.pestanas.add(tab_arq, text="  🏛 Arquitectura nueva  ")
+        self.panel_arquitectura = PanelArquitecturaNueva(tab_arq, controlador)
+        self.panel_arquitectura.pack(fill="both", expand=True)
+        self._pestana_vocabulario()
+        self._pestana_aprendido()
+
+    # --- Pestaña 1: Regla nueva ---
+    def _lista_multiple(self, padre, titulo, color):
+        marco = _tarjeta(padre, padx=10, pady=8)
+        _titulo(marco, titulo, color).pack(anchor="w", pady=(0, 4))
+        caja = tk.Frame(marco, bg=COLOR_TARJETA)
+        caja.pack(fill="both", expand=True)
+        lb = tk.Listbox(caja, selectmode="multiple", exportselection=False, height=14,
+                        font=(FUENTE_BASE, 9), relief="flat", bg=COLOR_SUPERFICIE,
+                        selectbackground=color, activestyle="none")
+        sb = ttk.Scrollbar(caja, orient="vertical", command=lb.yview)
+        lb.configure(yscrollcommand=sb.set)
+        lb.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        for rid in self.ids_req:
+            lb.insert("end", self.etiquetas[rid])
+        return marco, lb
+
+    def _pestana_regla(self):
+        tab = ttk.Frame(self.pestanas, padding=10)
+        self.pestanas.add(tab, text="  📐 Regla nueva  ")
+
+        datos = _tarjeta(tab, padx=14, pady=10)
+        datos.pack(fill="x", pady=(0, 8))
+        datos.grid_columnconfigure(1, weight=1)
+
+        _titulo(datos, "ID DE LA REGLA").grid(row=0, column=0, sticky="w")
+        _titulo(datos, "EXPLICACIÓN EN LENGUAJE CLARO (OBLIGATORIA)").grid(row=0, column=1, sticky="w", padx=(12, 0))
+        self.var_id_regla = tk.StringVar()
+        self.var_expl_regla = tk.StringVar()
+        ttk.Entry(datos, textvariable=self.var_id_regla, width=34, font=(FUENTE_BASE, 10)).grid(
+            row=1, column=0, sticky="w", pady=(4, 8))
+        ttk.Entry(datos, textvariable=self.var_expl_regla, font=(FUENTE_BASE, 10)).grid(
+            row=1, column=1, sticky="ew", padx=(12, 0), pady=(4, 8))
+
+        fila = tk.Frame(datos, bg=COLOR_TARJETA)
+        fila.grid(row=2, column=0, columnspan=2, sticky="w")
+        tk.Label(fila, text="EFECTO", font=(FUENTE_BASE, 8, "bold"), bg=COLOR_TARJETA,
+                 fg=COLOR_TEXTO_MUTED).pack(side="left", padx=(0, 6))
+        self.var_efecto = tk.StringVar(value="recomendar")
+        for valor, texto in (("recomendar", "Recomendar (bonus)"), ("descartar", "Descartar")):
+            ttk.Radiobutton(fila, text=texto, value=valor, variable=self.var_efecto,
+                            style="Tarjeta.TRadiobutton",
+                            command=self._al_cambiar_efecto).pack(side="left", padx=(0, 8))
+        tk.Label(fila, text="PESO", font=(FUENTE_BASE, 8, "bold"), bg=COLOR_TARJETA,
+                 fg=COLOR_TEXTO_MUTED).pack(side="left", padx=(14, 6))
+        self.var_peso_regla = tk.StringVar(value="3")
+        self.spin_peso = ttk.Spinbox(fila, from_=1, to=5, width=4, textvariable=self.var_peso_regla,
+                                     font=(FUENTE_BASE, 10))
+        self.spin_peso.pack(side="left")
+        tk.Label(fila, text="ESTILO AFECTADO", font=(FUENTE_BASE, 8, "bold"), bg=COLOR_TARJETA,
+                 fg=COLOR_TEXTO_MUTED).pack(side="left", padx=(18, 6))
+        self.var_estilo_regla = tk.StringVar()
+        self.combo_estilo = ttk.Combobox(fila, textvariable=self.var_estilo_regla, state="readonly",
+                                         width=44, font=(FUENTE_BASE, 9))
+        self.combo_estilo.pack(side="left")
+
+        listas = tk.Frame(tab, bg=COLOR_FONDO)
+        listas.pack(fill="both", expand=True)
+        m1, self.lb_condiciones = self._lista_multiple(
+            listas, "CONDICIONES: requisitos que DEBEN cumplirse (multi selección)", COLOR_PRIMARIO)
+        m2, self.lb_exclusiones = self._lista_multiple(
+            listas, "EXCLUSIONES: requisitos que NO deben estar (se traducen a \\+)", COLOR_PELIGRO)
+        m1.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        m2.pack(side="left", fill="both", expand=True, padx=(6, 0))
+
+        acciones = tk.Frame(tab, bg=COLOR_FONDO)
+        acciones.pack(fill="x", pady=(8, 0))
+        ttk.Button(acciones, text="✕ Limpiar", style="Suave.TButton",
+                   command=self.limpiar_regla).pack(side="left")
+        ttk.Button(acciones, text="💾 Guardar regla", style="Primario.TButton",
+                   command=self.guardar_regla).pack(side="right")
+
+        self.lbl_msg_regla = _etiqueta_mensaje(tab)
+        self.lbl_msg_regla.pack(fill="x", pady=(8, 0))
+        self.txt_clausula = tk.Text(tab, height=4, font=("Consolas", 10), bg=COLOR_HEADER,
+                                    fg="#e2e8f0", relief="flat", padx=10, pady=6)
+        self.txt_clausula.insert("1.0", "% Aquí aparecerá la cláusula que Prolog construye y escribe en el archivo.")
+        self.txt_clausula.configure(state="disabled")
+        self.txt_clausula.pack(fill="x", pady=(6, 0))
+
+    def _al_cambiar_efecto(self):
+        self.spin_peso.configure(state="normal" if self.var_efecto.get() == "recomendar" else "disabled")
+
+    def _seleccionados(self, lb):
+        return [self.ids_req[i] for i in lb.curselection()]
+
+    def limpiar_regla(self):
+        self.var_id_regla.set("")
+        self.var_expl_regla.set("")
+        self.var_peso_regla.set("3")
+        self.var_efecto.set("recomendar")
+        self._al_cambiar_efecto()
+        self.lb_condiciones.selection_clear(0, "end")
+        self.lb_exclusiones.selection_clear(0, "end")
+
+    def guardar_regla(self):
+        nombre = self.var_estilo_regla.get()
+        estilo = next((i for i, (n, _d) in self.estilos.items() if n == nombre), nombre)
+        try:
+            res = self.puente.ensenar_regla(
+                self.var_id_regla.get(), self.var_expl_regla.get(), estilo,
+                self.var_efecto.get(), self.var_peso_regla.get(),
+                self._seleccionados(self.lb_condiciones), self._seleccionados(self.lb_exclusiones))
+        except Exception as error:
+            _pintar_mensaje(self.lbl_msg_regla, f"Error al consultar SWI-Prolog: {error}", "error")
+            return
+        if res["tipo"] != "ok":
+            _pintar_mensaje(self.lbl_msg_regla, "✖ " + con_tildes(res["mensaje"]), "error")
+            return
+        _pintar_mensaje(self.lbl_msg_regla, "✔ " + con_tildes(res["mensaje"]), "exito")
+        self.txt_clausula.configure(state="normal")
+        self.txt_clausula.delete("1.0", "end")
+        self.txt_clausula.insert("1.0", res["clausula"])
+        self.txt_clausula.configure(state="disabled")
+        self.limpiar_regla()
+        self.controlador.conocimiento_actualizado()
+
+    # --- Pestaña 3: Vocabulario ---
+    def _pestana_vocabulario(self):
+        tab = ttk.Frame(self.pestanas, padding=10)
+        self.pestanas.add(tab, text="  🔤 Vocabulario  ")
+
+        card = _tarjeta(tab, padx=14, pady=10)
+        card.pack(fill="x", pady=(0, 8))
+        card.grid_columnconfigure(0, weight=1)
+        _titulo(card, "FRASE EN LENGUAJE NATURAL").grid(row=0, column=0, sticky="w")
+        _titulo(card, "REQUISITO AL QUE EQUIVALE").grid(row=0, column=1, sticky="w", padx=(12, 0))
+        _titulo(card, "POLARIDAD").grid(row=0, column=2, sticky="w", padx=(12, 0))
+        self.var_frase = tk.StringVar()
+        ttk.Entry(card, textvariable=self.var_frase, font=(FUENTE_BASE, 10)).grid(
+            row=1, column=0, sticky="ew", pady=(4, 0))
+        self.var_req_sin = tk.StringVar()
+        self.combo_req = ttk.Combobox(card, textvariable=self.var_req_sin, state="readonly", width=48,
+                                      values=[self.etiquetas[r] for r in self.ids_req], font=(FUENTE_BASE, 9))
+        self.combo_req.grid(row=1, column=1, padx=(12, 0), pady=(4, 0))
+        self.combo_req.bind("<<ComboboxSelected>>", lambda _e: self._mostrar_formulaciones())
+        fila_pol = tk.Frame(card, bg=COLOR_TARJETA)
+        fila_pol.grid(row=1, column=2, padx=(12, 0), pady=(4, 0))
+        self.var_pol = tk.StringVar(value="afirma")
+        for valor, texto in (("afirma", "Afirma"), ("niega", "Niega")):
+            ttk.Radiobutton(fila_pol, text=texto, value=valor, variable=self.var_pol,
+                            style="Tarjeta.TRadiobutton").pack(side="left", padx=(0, 6))
+        ttk.Button(card, text="💾 Guardar sinónimo", style="Primario.TButton",
+                   command=self.guardar_sinonimo).grid(row=1, column=3, padx=(12, 0), pady=(4, 0))
+        tk.Label(card, text="«Niega» sirve para frases como «carga estable» (niega Carga variable).",
+                 font=(FUENTE_BASE, 8), bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).grid(
+            row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+        self.lbl_msg_sin = _etiqueta_mensaje(tab)
+        self.lbl_msg_sin.pack(fill="x")
+
+        prueba = _tarjeta(tab, padx=14, pady=10)
+        prueba.pack(fill="x", pady=(8, 8))
+        _titulo(prueba, "PROBAR LA INTERPRETACIÓN (sin reiniciar)").pack(anchor="w")
+        fila_p = tk.Frame(prueba, bg=COLOR_TARJETA)
+        fila_p.pack(fill="x", pady=(4, 0))
+        self.var_prueba = tk.StringVar()
+        ttk.Entry(fila_p, textvariable=self.var_prueba, font=(FUENTE_BASE, 10)).pack(
+            side="left", fill="x", expand=True)
+        ttk.Button(fila_p, text="🔎 Probar", style="Suave.TButton",
+                   command=self.probar_frase).pack(side="left", padx=(8, 0))
+        self.lbl_prueba = tk.Label(prueba, text="", font=(FUENTE_BASE, 9), bg=COLOR_TARJETA,
+                                   fg=COLOR_TEXTO, justify="left", anchor="w")
+        self.lbl_prueba.pack(fill="x", pady=(6, 0))
+
+        form = _tarjeta(tab, padx=14, pady=10)
+        form.pack(fill="both", expand=True)
+        _titulo(form, "FORMULACIONES QUE YA ENTIENDE ESTE REQUISITO").pack(anchor="w")
+        self.lbl_formulaciones = tk.Label(form, text="Elija un requisito arriba.", font=(FUENTE_BASE, 9),
+                                          bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED, justify="left",
+                                          anchor="nw", wraplength=1000)
+        self.lbl_formulaciones.pack(fill="both", expand=True, pady=(4, 0))
+
+    def _req_elegido(self):
+        etiqueta = self.var_req_sin.get()
+        return next((r for r in self.ids_req if self.etiquetas[r] == etiqueta), etiqueta)
+
+    def _mostrar_formulaciones(self):
+        req = self._req_elegido()
+        try:
+            frases = self.puente.formulaciones(req)
+        except Exception:
+            frases = []
+        self.lbl_formulaciones.configure(
+            text=" · ".join(f"«{f}»" for f in frases) if frases else "(ninguna)", fg=COLOR_TEXTO)
+
+    def guardar_sinonimo(self):
+        try:
+            res = self.puente.ensenar_sinonimo(self.var_frase.get(), self._req_elegido(), self.var_pol.get())
+        except Exception as error:
+            _pintar_mensaje(self.lbl_msg_sin, f"Error al consultar SWI-Prolog: {error}", "error")
+            return
+        if res["tipo"] != "ok":
+            _pintar_mensaje(self.lbl_msg_sin, "✖ " + con_tildes(res["mensaje"]), "error")
+            return
+        _pintar_mensaje(self.lbl_msg_sin, "✔ " + con_tildes(res["mensaje"]), "exito")
+        self.var_prueba.set(self.var_frase.get())
+        self.var_frase.set("")
+        self._mostrar_formulaciones()
+        self.controlador.conocimiento_actualizado()
+
+    def probar_frase(self):
+        r = self.puente.interpretar(self.var_prueba.get())
+        partes = [self.etiquetas.get(q, q) for q in r["requisitos"]]
+        partes += [f"NO: {self.etiquetas.get(q, q)}" for q in r["negados"]]
+        txt = "✔ Entendí: " + ("; ".join(partes) if partes else "(nada)")
+        if r["no_entendido"]:
+            txt += "\n⚠ No entendí: " + ", ".join(r["no_entendido"])
+        self.lbl_prueba.configure(text=txt)
+
+    # --- Pestaña 4: Reglas y conocimiento aprendido ---
+    def _pestana_aprendido(self):
+        tab = ttk.Frame(self.pestanas, padding=10)
+        self.pestanas.add(tab, text="  📚 Reglas y conocimiento aprendido  ")
+        self.lbl_msg_apr = _etiqueta_mensaje(tab)
+        self.lbl_msg_apr.pack(fill="x", side="bottom", pady=(6, 0))
+        panel = PanelDesplazable(tab)
+        panel.pack(fill="both", expand=True)
+        self.zona_aprendido = panel.interior
+
+    def refrescar(self):
+        """Relee de Prolog estilos (también los aprendidos) y lo aprendido."""
+        self.estilos = self.puente.estilos()
+        nombres = [n for n, _d in self.estilos.values()]
+        self.combo_estilo.configure(values=nombres)
+        if self.var_estilo_regla.get() not in nombres:
+            self.var_estilo_regla.set(nombres[0] if nombres else "")
+        self._dibujar_aprendido()
+
+    def _seccion(self, titulo, items, vacio, dibujar_item):
+        card = _tarjeta(self.zona_aprendido, padx=14, pady=10)
+        card.pack(fill="x", pady=(0, 8), padx=(0, 4))
+        _titulo(card, f"{titulo} ({len(items)})", COLOR_PRIMARIO).pack(anchor="w", pady=(0, 4))
+        if not items:
+            tk.Label(card, text=vacio, font=(FUENTE_BASE, 9), bg=COLOR_TARJETA,
+                     fg=COLOR_TEXTO_MUTED).pack(anchor="w")
+        for it in items:
+            fila = tk.Frame(card, bg=COLOR_TARJETA)
+            fila.pack(fill="x", pady=2)
+            texto, accion = dibujar_item(it)
+            ttk.Button(fila, text="🗑", width=3, style="Peligro.TButton",
+                       command=accion).pack(side="right", padx=(6, 0))
+            tk.Label(fila, text=texto, font=(FUENTE_BASE, 9), bg=COLOR_TARJETA, fg=COLOR_TEXTO,
+                     justify="left", anchor="w", wraplength=1050).pack(side="left", fill="x")
+
+    def _dibujar_aprendido(self):
+        for h in self.zona_aprendido.winfo_children():
+            h.destroy()
+        reglas = self.puente.reglas_aprendidas()
+        estilos = self.puente.estilos_aprendidos()
+        sinonimos = self.puente.sinonimos_aprendidos()
+
+        def item_regla(r):
+            nombre = self.estilos.get(r["estilo"], (r["estilo"], ""))[0]
+            efecto = f"+{r['peso']} a {nombre}" if r["efecto"] == "recomendar" else f"descarta {nombre}"
+            conds = ", ".join(self.etiquetas.get(c, c) for c in r["condiciones"])
+            excl = ", ".join(self.etiquetas.get(x, x) for x in r["exclusiones"]) or "—"
+            texto = (f"{r['id']}  ·  {efecto}\n   SI: {conds}\n   Y NO: {excl}\n"
+                     f"   «{con_tildes(r['explicacion'])}»")
+            return texto, lambda i=r["id"]: self.eliminar_regla(i)
+
+        def item_estilo(e):
+            id_estilo, nombre = e
+            return f"{nombre}  ({id_estilo})", lambda i=id_estilo, n=nombre: self.eliminar_estilo(i, n)
+
+        def item_sinonimo(s):
+            frase, req, pol = s
+            return (f"«{frase}» → {self.etiquetas.get(req, req)} ({pol})",
+                    lambda f=frase: self.eliminar_sinonimo(f))
+
+        self._seccion("REGLAS EXPERTAS", reglas, "Todavía no hay reglas aprendidas.", item_regla)
+        self._seccion("ARQUITECTURAS APRENDIDAS", estilos, "Todavía no hay arquitecturas aprendidas.", item_estilo)
+        self._seccion("SINÓNIMOS DEL VOCABULARIO", sinonimos, "Todavía no hay sinónimos aprendidos.", item_sinonimo)
+
+    def _tras_eliminar(self, ok, texto_ok, texto_fallo):
+        _pintar_mensaje(self.lbl_msg_apr, texto_ok if ok else texto_fallo, "exito" if ok else "error")
+        self.controlador.conocimiento_actualizado()
+
+    def eliminar_regla(self, id_regla):
+        if not messagebox.askyesno("Confirmar", f"¿Eliminar la regla experta «{id_regla}»?\n"
+                                   "Se retracta de la base y se reescribe el archivo de aprendizaje."):
+            return
+        try:
+            ok = self.puente.olvidar_regla(id_regla)
+        except Exception as error:
+            ok, id_regla = False, f"{id_regla} ({error})"
+        self._tras_eliminar(ok, f"✔ Regla «{id_regla}» eliminada.", f"✖ No se pudo eliminar «{id_regla}».")
+
+    def eliminar_estilo(self, id_estilo, nombre):
+        if not messagebox.askyesno("Confirmar", f"¿Eliminar la arquitectura «{nombre}» ({id_estilo})?\n"
+                                   "También se eliminan las reglas expertas que hablan de ella."):
             return
         if not self.puente.olvidar_estilo(id_estilo):
-            self._mensaje(f"✖ Prolog no eliminó «{nombre}»: no es una arquitectura aprendida.", "error")
+            self._tras_eliminar(False, "", f"✖ Prolog no eliminó «{nombre}»: no es una arquitectura aprendida.")
             return
         try:
             self.puente.guardar_aprendizaje()
+            self._tras_eliminar(True, f"✔ Arquitectura «{nombre}» eliminada.", "")
         except Exception as error:
-            self._mensaje(f"⚠ Se eliminó en memoria, pero no se pudo actualizar el archivo: {error}",
-                          "advertencia")
-        else:
-            self._mensaje(f"✔ Arquitectura «{nombre}» eliminada.", "exito")
-        self.controlador.conocimiento_actualizado()
+            self._tras_eliminar(False, "", f"⚠ Se eliminó en memoria, pero no se pudo actualizar el archivo: {error}")
 
-    def refrescar_aprendidas(self):
-        for h in self.zona_aprendidas.winfo_children():
-            h.destroy()
-        aprendidas = self.puente.estilos_aprendidos()
-        if not aprendidas:
-            tk.Label(self.zona_aprendidas, text="Todavía no hay arquitecturas aprendidas.",
-                     font=(FUENTE_BASE, 9), bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(anchor="w")
+    def eliminar_sinonimo(self, frase):
+        if not messagebox.askyesno("Confirmar", f"¿Eliminar el sinónimo «{frase}»?"):
             return
-        for id_estilo, nombre in aprendidas:
-            fila = tk.Frame(self.zona_aprendidas, bg=COLOR_TARJETA)
-            fila.pack(fill="x", pady=1)
-            tk.Label(fila, text=nombre, font=(FUENTE_BASE, 9, "bold"),
-                     bg=COLOR_TARJETA, fg=COLOR_TEXTO).pack(side="left")
-            tk.Label(fila, text=f"  ({id_estilo})", font=(FUENTE_BASE, 9),
-                     bg=COLOR_TARJETA, fg=COLOR_TEXTO_MUTED).pack(side="left")
-            ttk.Button(fila, text="🗑", width=3, style="Peligro.TButton",
-                       command=lambda i=id_estilo, n=nombre: self.eliminar(i, n)).pack(side="right", padx=(0, 4))
+        try:
+            ok = self.puente.olvidar_sinonimo(frase)
+        except Exception:
+            ok = False
+        self._tras_eliminar(ok, f"✔ Sinónimo «{frase}» eliminado.", f"✖ No se pudo eliminar «{frase}».")
+
+    def al_mostrar(self):
+        self.refrescar()
+
+    def ir_a_pestana(self, indice):
+        self.pestanas.select(indice)
 
 
 # ---------------------------------------------------------------------------
@@ -1524,6 +2132,8 @@ class ControladorApp(tk.Tk):
         super().__init__()
         self.puente = puente
         self.historial = historial
+        self.rol = "usuario"              # usuario | experto
+        self._etiquetas_rol = []          # chips de rol de cada encabezado
 
         self.title("ArquiSelect · Sistema Experto de Arquitectura de Software")
         self.geometry("1280x820")
@@ -1544,13 +2154,56 @@ class ControladorApp(tk.Tk):
         contenedor.grid_columnconfigure(0, weight=1)
 
         self.vistas = {}
-        for ClaseVista in (VistaInicio, VistaEvaluacion, VistaNuevaArquitectura, VistaHistorial):
+        for ClaseVista in (VistaInicio, VistaEvaluacion, VistaModoExperto, VistaHistorial):
             vista = ClaseVista(contenedor, self)
             self.vistas[ClaseVista.__name__] = vista
             vista.grid(row=0, column=0, sticky="nsew")
 
+        self._actualizar_etiquetas_rol()
         self.mostrar_vista("VistaInicio")
         self.after(400, self._avisar_aprendizaje_danado)
+
+    # --- Rol (control de acceso de DEMOSTRACIÓN) ---
+    def registrar_etiqueta_rol(self, etiqueta):
+        self._etiquetas_rol.append(etiqueta)
+
+    def _actualizar_etiquetas_rol(self):
+        if self.rol == "experto":
+            texto, bg_c, fg_c = "🛡 ROL: EXPERTO", COLOR_AMBAR_BG, COLOR_AMBAR_TEXT
+        else:
+            texto, bg_c, fg_c = "👤 ROL: USUARIO", "#1e293b", COLOR_HEADER_SUB
+        for lbl in self._etiquetas_rol:
+            lbl.configure(text=texto, bg=bg_c, fg=fg_c)
+
+    def cambiar_rol(self, rol, pin=None):
+        """Experto exige el PIN (pin_valido compara su sha256). Devuelve True si
+        el rol quedó aplicado. pin=None lo pide con un diálogo."""
+        pedido = rol
+        if rol == "experto" and self.rol != "experto":
+            if pin is None:
+                pin = simpledialog.askstring("Modo Experto", "PIN del experto:", show="*", parent=self)
+            if not pin_valido(pin):
+                if pin is not None:
+                    messagebox.showerror("Modo Experto", "PIN incorrecto. Se mantiene el rol Usuario.")
+                rol = "usuario"
+        if rol not in ("usuario", "experto"):
+            rol = "usuario"
+        self.rol = rol
+        self._actualizar_etiquetas_rol()
+        inicio = self.vistas.get("VistaInicio")
+        if inicio is not None:
+            inicio.actualizar_rol()
+        return self.rol == pedido
+
+    def abrir_modo_experto(self, pestana=0):
+        if self.rol != "experto":
+            messagebox.showinfo("Modo Experto",
+                                "Esta función requiere el rol Experto.\n"
+                                "Cámbielo en la pantalla de Inicio (se pide el PIN).")
+            return False
+        self.mostrar_vista("VistaModoExperto")
+        self.vistas["VistaModoExperto"].ir_a_pestana(pestana)
+        return True
 
     def _avisar_aprendizaje_danado(self):
         tipo, detalle = self.puente.estado_aprendizaje
@@ -1566,7 +2219,7 @@ class ControladorApp(tk.Tk):
         sin reiniciar (estilos, descripciones, comparativa, ranking, dictamen,
         preguntas guiadas y la lista de aprendidas)."""
         self.vistas["VistaEvaluacion"].refrescar_conocimiento()
-        self.vistas["VistaNuevaArquitectura"].refrescar_aprendidas()
+        self.vistas["VistaModoExperto"].refrescar()
 
     def _configurar_estilos_ttk(self):
         estilo = ttk.Style(self)
@@ -1590,6 +2243,12 @@ class ControladorApp(tk.Tk):
             font=(FUENTE_BASE, 9)
         )
         estilo.map("Sintoma.TCheckbutton", background=[("active", COLOR_SUPERFICIE)])
+        estilo.configure("Rol.TRadiobutton", background=COLOR_FONDO, foreground=COLOR_TEXTO,
+                         font=(FUENTE_BASE, 10, "bold"))
+        estilo.map("Rol.TRadiobutton", background=[("active", COLOR_SUPERFICIE)])
+        estilo.configure("Tarjeta.TRadiobutton", background=COLOR_TARJETA, foreground=COLOR_TEXTO,
+                         font=(FUENTE_BASE, 9))
+        estilo.map("Tarjeta.TRadiobutton", background=[("active", COLOR_SUPERFICIE)])
 
         # Botón Primario (Indigo Moderno)
         estilo.configure(
@@ -1663,6 +2322,8 @@ class ControladorApp(tk.Tk):
                          bordercolor=COLOR_FONDO, arrowcolor=COLOR_TEXTO_MUTED)
 
     def mostrar_vista(self, nombre_vista):
+        if nombre_vista == "VistaModoExperto" and self.rol != "experto":
+            return                         # con rol Usuario no hay acceso
         vista = self.vistas[nombre_vista]
         if hasattr(vista, "al_mostrar"):
             vista.al_mostrar()

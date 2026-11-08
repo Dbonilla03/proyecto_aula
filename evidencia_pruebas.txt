@@ -1,6 +1,6 @@
 ==============================================================================
 EVIDENCIA DE PRUEBAS - ArquiSelect (11 estilos + aprendizaje en caliente)
-Fecha: 2026-11-04 14:25:23   Python 3.13.14   pyswip 0.3.3   SO Windows 11
+Fecha: 2026-11-08 01:29:53   Python 3.13.14   pyswip 0.3.3   SO Windows 11
 SWI-Prolog 100002   Carpeta temporal de persistencia: <carpeta temporal>
 ==============================================================================
 
@@ -253,7 +253,7 @@ SWI-Prolog 100002   Carpeta temporal de persistencia: <carpeta temporal>
    OK     danado: 'danado'
           por que : error de sintaxis atrapado con catch/3
    OK     respaldo creado: True
-          por que : C:/Users/andre/AppData/Local/Temp/arquiselect_pruebas_5i18t1pn/danado.pl.danado
+          por que : C:/Users/andre/AppData/Local/Temp/arquiselect_pruebas_c5tda2ed/danado.pl.danado
    OK     quedan los 11 estilos: 11
    OK     la inferencia funciona: 'monolito_capas'
 
@@ -268,9 +268,9 @@ SWI-Prolog 100002   Carpeta temporal de persistencia: <carpeta temporal>
 RESULTADO: 120/120 verificaciones correctas, 0 fallas.
 
 TAMANO DE LA BASE (base_conocimiento.pl, sin lo aprendido):
-   hechos (clausulas sin cuerpo) ........ 286  en 59 predicados
-   reglas (clausulas con cuerpo) ........ 165  en 98 predicados
-   predicados distintos ................. 123
+   hechos (clausulas sin cuerpo) ........ 464  en 71 predicados
+   reglas (clausulas con cuerpo) ........ 240  en 137 predicados
+   predicados distintos ................. 167
 
 CAMBIOS EN LOS ESPERADOS AL PASAR DE 5 A 11 ESTILOS:
  - A1 (caso 1): mismo dictamen (monolito_capas 9, definitivo). Cambian el ranking (entran mvc 7 y cliente_servidor 6), la competencia (mvc reemplaza a serverless por max_competidores = 3) y la primera pregunta: antes latencia_critica (poder 7), ahora despliegue_independiente (poder 5).

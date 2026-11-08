@@ -16,6 +16,24 @@
 :- dynamic descripcion_estilo/2.
 :- dynamic estilo_aprendido/1.
 
+/* --- 0.1b Predicados dinamicos del ENTREGABLE 3 ---------------------------
+        regla_experta/5   : reglas que el experto ensena en caliente (seccion
+                            9). Cada una es una CLAUSULA con cuerpo, no un
+                            hecho. Sin reglas, la llamada simplemente falla
+                            y el razonamiento queda igual que en el
+                            entregable 2.
+        explicacion_regla/2: texto claro de cada regla experta.
+        lexico/3          : vocabulario de la DCG (lenguaje_natural.pl); el
+                            experto le agrega sinonimos con assertz.
+        ruta_aprendizaje_fijada/1: permite que las pruebas usen un archivo de
+                            aprendizaje temporal en vez del real. --------- */
+:- dynamic regla_experta/5.
+:- dynamic explicacion_regla/2.
+:- dynamic lexico/3.
+:- dynamic ruta_aprendizaje_fijada/1.
+
+:- use_module(library(filesex)).        % copy_file/2 para la copia .bak
+
 /* --- 0.2 Carpeta de este archivo: directorio_base(Dir) -------------------
         Se fija al consultar el .pl para que guardar_aprendizaje/0 escriba
         conocimiento_aprendido.pl junto a la base, sin depender de Python. */
@@ -23,6 +41,11 @@
 :- prolog_load_context(directory, Dir),
    retractall(directorio_base(_)),
    assertz(directorio_base(Dir)).
+
+/* --- 0.3 Modulo de lenguaje natural (DCG, entregable 3) -------------------
+        La ruta es relativa a ESTE archivo (ensure_loaded la resuelve desde
+        la carpeta del .pl que se esta cargando, no desde Python). */
+:- ensure_loaded('lenguaje_natural.pl').
 
 /* ==========================================================================
    SECCION 1. HECHOS
@@ -377,6 +400,13 @@ contiene_todos([H|T], Lista) :-
     memberchk(H, Lista),
     contiene_todos(T, Lista).
 
+/* contiene_alguno(+Sub, +Lista): al menos un elemento de Sub esta en Lista.
+   Las reglas expertas lo usan negado (\+) para sus exclusiones; el corte
+   detiene la busqueda en el primer elemento comun (basta con uno). */
+contiene_alguno(Sub, Lista) :-
+    member(X, Sub),
+    memberchk(X, Lista), !.
+
 /* atributo_requerido(+Reqs, ?Atributo): un requisito de la lista exige el
    atributo de calidad. */
 atributo_requerido(Reqs, Atributo) :-
@@ -402,10 +432,25 @@ suficiencia(_, suficiente).
    ========================================================================== */
 
 /* motivo_descarte(+Estilo, +Reqs, -Motivo): el estilo choca con un requisito
-   (usa incompatible/2, un hecho de exclusion dura). */
+   (usa incompatible/2, un hecho de exclusion dura). La 2a clausula agrega
+   las reglas expertas con efecto "descartar": Motivo es el id de la regla.
+   Sin reglas aprendidas la 2a clausula no tiene soluciones. */
 motivo_descarte(Estilo, Reqs, Motivo) :-
     member(Motivo, Reqs),
     incompatible(Estilo, Motivo).
+motivo_descarte(Estilo, Reqs, Id) :-
+    regla_descarta(Estilo, Reqs, Id).
+
+/* regla_descarta(?Estilo, +Reqs, -Id): una regla experta de descarte se
+   dispara con los requisitos dados. */
+regla_descarta(Estilo, Reqs, Id) :-
+    regla_experta(Id, Estilo, descartar, _, Reqs).
+
+/* bonus_reglas(+Estilo, +Reqs, -Bonus): suma de los pesos de las reglas
+   expertas "recomendar" que se disparan para el estilo (0 si no hay). */
+bonus_reglas(Estilo, Reqs, Bonus) :-
+    findall(P, regla_experta(_, Estilo, recomendar, P, Reqs), Ps),
+    sum_list(Ps, Bonus).
 
 /* estilo_viable(?Estilo, +Reqs): NEGACION POR FALLO.
    estilo/2 instancia Estilo ANTES de \+, asi la negacion se evalua con
@@ -428,11 +473,15 @@ penalizacion_total(Estilo, Reqs, Total) :-
     findall(P, ( member(R, Reqs), penaliza(Estilo, R, P) ), Pesos),
     sum_list(Pesos, Total).
 
-/* puntaje(+Estilo, +Reqs, -Puntaje): aporte menos penalizacion. */
+/* puntaje(+Estilo, +Reqs, -Puntaje): aporte menos penalizacion, mas el
+   bonus de las reglas expertas disparadas (entregable 3). Como ranking,
+   candidatos, que_falta y descartes pasan por aqui, todos toman en cuenta
+   las reglas sin cambiar de firma. Sin reglas el bonus es 0. */
 puntaje(Estilo, Reqs, Puntaje) :-
     aporte_total(Estilo, Reqs, Aporte),
     penalizacion_total(Estilo, Reqs, Penal),
-    Puntaje is Aporte - Penal.
+    bonus_reglas(Estilo, Reqs, Bonus),
+    Puntaje is Aporte - Penal + Bonus.
 
 /* cubiertos(+Estilo, +Reqs, -Cubiertos, -Cantidad): FILTRA y CUENTA los
    atributos exigidos que el estilo realmente favorece. */
@@ -531,13 +580,18 @@ descartes(Reqs, Lista) :-
             Lista).
 
 /* motivo_no_candidato(+Estilo, +Reqs, -Tipo, -Motivo):
-   1) exclusion: el estilo choca con un requisito (motivo_descarte/3). El
+   1) exclusion: el estilo choca con un requisito (incompatible/2). El
       corte deja un solo motivo aunque varios requisitos lo excluyan, para
-      que el estilo aparezca una sola vez, e impide caer en la 2a clausula.
+      que el estilo aparezca una sola vez, e impide caer en las siguientes.
+   1b) regla_experta: lo descarta una regla experta (Motivo = id de la
+      regla). Va despues de 1) para que, sin reglas, el resultado sea
+      identico al del entregable 2.
    2) sin_evidencia: el estilo es viable pero su puntaje es <= 0 (si fuera
       positivo estaria en candidatos/2). Motivo = puntaje. */
 motivo_no_candidato(E, V, exclusion, R) :-
-    motivo_descarte(E, V, R), !.
+    member(R, V), incompatible(E, R), !.
+motivo_no_candidato(E, V, regla_experta, Id) :-
+    regla_descarta(E, V, Id), !.
 motivo_no_candidato(E, V, sin_evidencia, P) :-
     estilo_viable(E, V),
     puntaje(E, V, P).
@@ -563,7 +617,12 @@ razones(Estilo, Reqs, Razones) :-
               penaliza(Estilo, R, P),
               format(atom(Frase), 'penalizado por ~w (-~w)', [R, P]) ),
             Penales),
-    append(Favores, Penales, Razones).
+    findall(Frase,
+            ( regla_experta(Id, Estilo, recomendar, P, Reqs),
+              explicacion_regla(Id, Ex),
+              format(atom(Frase), 'Regla experta ~w: ~w (+~w)', [Id, Ex, P]) ),
+            Expertas),
+    append([Favores, Penales, Expertas], Razones).
 
 /* diagnosticar_arquitectura(+Reqs, -Resultado...): PREDICADO PRINCIPAL.
    Orquesta todo el razonamiento. Python solo lo invoca y lee las salidas. */
@@ -619,11 +678,19 @@ regla_disparada(V, M, [2, 'penaliza/3', D]) :-
     member(R, V),
     penaliza(M, R, P),
     format(atom(D), '~w es penalizado por ~w (-~w)', [M, R, P]).
+% Reglas expertas (entregable 3): una linea por regla que se dispara, para
+% cualquier estilo (las de descarte afectan a estilos que no son el mejor).
+regla_disparada(V, _, [2, 'regla_experta/5', D]) :-
+    regla_experta(Id, E, Ef, P, V),
+    explicacion_regla(Id, Ex),
+    texto_efecto_regla(Ef, P, E, TE),
+    format(atom(D), 'Regla experta ~w: ~w (~w)', [Id, Ex, TE]).
 regla_disparada(V, M, [2, 'puntaje/3', D]) :-
     aporte_total(M, V, A),
     penalizacion_total(M, V, Pe),
+    bonus_reglas(M, V, B),
     puntaje(M, V, Pt),
-    format(atom(D), 'puntaje de ~w = ~w - ~w = ~w', [M, A, Pe, Pt]).
+    detalle_puntaje(M, A, Pe, B, Pt, D).
 regla_disparada(V, M, [2, 'nivel_prioridad/2', D]) :-
     puntaje(M, V, Pt),
     nivel_prioridad(Pt, N),
@@ -655,6 +722,21 @@ regla_disparada(V, _, [3, 'estado_dictamen/2', D]) :-
     estado_dictamen(V, E),
     confianza_estado(E, C),
     format(atom(D), 'dictamen ~w con confianza ~w', [E, C]).
+
+/* detalle_puntaje(+M, +Aporte, +Penal, +Bonus, +Puntaje, -D): sin bonus se
+   conserva el texto del entregable 2; con bonus se muestra la suma. Corte =
+   clausulas excluyentes. */
+detalle_puntaje(M, A, Pe, 0, Pt, D) :- !,
+    format(atom(D), 'puntaje de ~w = ~w - ~w = ~w', [M, A, Pe, Pt]).
+detalle_puntaje(M, A, Pe, B, Pt, D) :-
+    format(atom(D), 'puntaje de ~w = ~w - ~w + ~w (reglas expertas) = ~w',
+           [M, A, Pe, B, Pt]).
+
+/* texto_efecto_regla(+Efecto, +Peso, +Estilo, -Texto) */
+texto_efecto_regla(recomendar, P, E, T) :- !,
+    format(atom(T), '+~w a ~w', [P, E]).
+texto_efecto_regla(descartar, _, E, T) :-
+    format(atom(T), 'descarta ~w', [E]).
 
 /* detalle_primer_lugar(+Mejor, +Puntaje, +Resto, -Detalle): texto del paso
    ranking/2. Si otros estilos tienen el MISMO puntaje lo dice de forma
@@ -695,7 +777,7 @@ atributo_o_ninguno(_, ninguno).
    caso (comparte algo o fue penalizado). */
 hipotesis_descartada(V, _, [E, exclusion, Detalle, Comparte]) :-
     estilo(E, _),
-    findall(R, motivo_descarte(E, V, R), Motivos),
+    findall(T, ( motivo_descarte(E, V, R), texto_motivo(R, T) ), Motivos),
     Motivos \== [],
     atomic_list_concat(Motivos, ', ', Txt),
     format(atom(Detalle), 'condicion excluyente: ~w', [Txt]),
@@ -708,6 +790,13 @@ hipotesis_descartada(V, Mejor, [E, sin_evidencia, Detalle, Comparte]) :-
     cubiertos(E, V, Comparte, _),
     relacionado_con_caso(E, V, Comparte),
     format(atom(Detalle), 'puntaje ~w: no hay evidencia critica a su favor', [Pt]).
+
+/* texto_motivo(+Motivo, -Texto): un requisito se muestra tal cual; el id de
+   una regla experta se marca como tal. Corte = clausulas excluyentes. */
+texto_motivo(M, T) :-
+    explicacion_regla(M, _), !,
+    format(atom(T), 'regla experta ~w', [M]).
+texto_motivo(M, M).
 
 /* relacionado_con_caso(+E, +V, +Comparte): el estilo tuvo que ver con el
    caso, porque cubria algun atributo o porque algun requisito lo penalizo.
@@ -820,6 +909,13 @@ choca_con_ingresado(R, V) :-
    descarte y se representa con -peso_exclusion. */
 efecto_dato(E, _, R, Delta, descarta) :-
     incompatible(E, R), !,
+    peso_exclusion(P),
+    Delta is -P.
+% Regla experta de descarte que se dispararia SOLO al agregar R (no antes).
+% \+ con E, V y R ya ligados. Sin reglas aprendidas esta clausula no aplica.
+efecto_dato(E, V, R, Delta, descarta) :-
+    regla_descarta(E, [R|V], _),
+    \+ regla_descarta(E, V, _), !,
     peso_exclusion(P),
     Delta is -P.
 efecto_dato(E, V, R, Delta, Tipo) :-
@@ -1225,20 +1321,29 @@ olvidar_estilo(Id) :-
     estilo_aprendido(Id), !,
     borrar_hechos_estilo(Id).
 
+/* borrar_hechos_estilo(+Id): tambien borra las reglas expertas que hablan
+   de ese estilo; si no, quedarian reglas apuntando a un estilo que ya no
+   existe. */
 borrar_hechos_estilo(Id) :-
     retractall(estilo_aprendido(Id)),
     retractall(estilo(Id, _)),
     retractall(descripcion_estilo(Id, _)),
     retractall(aporta(Id, _, _)),
     retractall(incompatible(Id, _)),
-    retractall(penaliza(Id, _, _)).
+    retractall(penaliza(Id, _, _)),
+    findall(R, clause(regla_experta(R, Id, _, _, _), _), Rs),
+    forall(member(R, Rs), borrar_regla(R)).
 
-/* olvidar_aprendizaje: borra TODO lo aprendido (lo usan las pruebas y la
-   recarga). findall primero para no modificar estilo_aprendido/1 mientras
+/* olvidar_aprendizaje: borra TODO lo aprendido EN MEMORIA (estilos, reglas
+   expertas y sinonimos); no toca ningun archivo. Lo usan las pruebas y la
+   recarga. findall primero para no modificar estilo_aprendido/1 mientras
    se recorre. Siempre tiene exito. */
 olvidar_aprendizaje :-
     findall(Id, estilo_aprendido(Id), Ids),
-    forall(member(Id, Ids), borrar_hechos_estilo(Id)).
+    forall(member(Id, Ids), borrar_hechos_estilo(Id)),
+    retractall(regla_experta(_, _, _, _, _)),
+    retractall(explicacion_regla(_, _)),
+    borrar_sinonimos_aprendidos.
 
 /* estilos_aprendidos(-Lista): [[Id, Nombre], ...] para la interfaz. */
 estilos_aprendidos(Lista) :-
@@ -1247,31 +1352,133 @@ estilos_aprendidos(Lista) :-
 /* --- 8.8 Persistencia ------------------------------------------------------
    ruta_aprendizaje(-Ruta): conocimiento_aprendido.pl en la carpeta de la
    base (directorio_base/1 se fija al consultar este archivo). */
+/* Si las pruebas fijaron otra ruta (usar_archivo_aprendizaje/1) se usa esa;
+   si no, la ruta por defecto. Corte = clausulas excluyentes. */
 ruta_aprendizaje(Ruta) :-
+    ruta_aprendizaje_fijada(Ruta), !.
+ruta_aprendizaje(Ruta) :-
+    ruta_aprendizaje_defecto(Ruta).
+
+ruta_aprendizaje_defecto(Ruta) :-
     directorio_base(Dir),
     archivo_aprendizaje(Archivo),
     directory_file_path(Dir, Archivo, Ruta).
 
-/* guardar_aprendizaje: escribe todo lo aprendido en la ruta por defecto.
+/* usar_archivo_aprendizaje(+Ruta): todo lo que se ensene a partir de ahora
+   se escribe en Ruta (las pruebas usan un archivo temporal). */
+usar_archivo_aprendizaje(Ruta0) :-
+    atom_string(Ruta, Ruta0),
+    retractall(ruta_aprendizaje_fijada(_)),
+    assertz(ruta_aprendizaje_fijada(Ruta)).
+
+/* limpiar_aprendizaje(+Ruta): punto de partida de cada prueba. Olvida lo
+   aprendido en memoria, borra el archivo de PRUEBAS (y sus .bak/.tmp) y lo
+   deja como archivo activo. Se niega a borrar el archivo real: si Ruta es
+   la ruta por defecto, falla sin tocar nada. */
+limpiar_aprendizaje(Ruta0) :-
+    atom_string(Ruta, Ruta0),
+    ruta_aprendizaje_defecto(Def),
+    absolute_file_name(Ruta, A1),
+    absolute_file_name(Def, A2),
+    A1 \== A2,
+    olvidar_aprendizaje,
+    forall(( member(Suf, ['', '.bak', '.tmp']), atom_concat(Ruta, Suf, F),
+             exists_file(F) ),
+           delete_file(F)),
+    usar_archivo_aprendizaje(Ruta).
+
+/* guardar_aprendizaje: escribe todo lo aprendido en la ruta activa.
    guardar_aprendizaje(+Ruta): idem en otra ruta (las pruebas la usan para
-   no tocar el archivo real). setup_call_cleanup cierra el archivo aunque
-   falle la escritura. */
+   no tocar el archivo real). REESCRITURA ATOMICA: se escribe un .tmp, se
+   copia el archivo anterior a .bak y el .tmp reemplaza al original con
+   rename_file/2; si algo falla a mitad, el archivo original queda intacto.
+   setup_call_cleanup cierra el archivo aunque falle la escritura. */
 guardar_aprendizaje :-
     ruta_aprendizaje(Ruta),
     guardar_aprendizaje(Ruta).
 
 guardar_aprendizaje(Ruta) :-
-    setup_call_cleanup(open(Ruta, write, S, [encoding(utf8)]),
+    atom_concat(Ruta, '.tmp', Tmp),
+    setup_call_cleanup(open(Tmp, write, S, [encoding(utf8)]),
                        escribir_aprendizaje(S),
-                       close(S)).
+                       close(S)),
+    reemplazar_archivo(Tmp, Ruta).
+
+/* reemplazar_archivo(+Tmp, +Ruta): copia .bak del original (si existe) y
+   renombra Tmp sobre Ruta. */
+reemplazar_archivo(Tmp, Ruta) :-
+    respaldar_archivo(Ruta),
+    rename_file(Tmp, Ruta).
+
+respaldar_archivo(Ruta) :-
+    exists_file(Ruta), !,
+    atom_concat(Ruta, '.bak', Bak),
+    copy_file(Ruta, Bak).
+respaldar_archivo(_).
+
+escribir_cabecera(S) :-
+    format(S, '/* conocimiento_aprendido.pl - generado por ArquiSelect.~n', []),
+    format(S, '   Estilos, reglas expertas y sinonimos ensenados desde la interfaz.~n', []),
+    format(S, '   Lo lee cargar_aprendizaje/1, que valida cada termino (no se~n', []),
+    format(S, '   consulta directamente). */~n~n', []).
 
 escribir_aprendizaje(S) :-
-    format(S, '/* conocimiento_aprendido.pl - generado por ArquiSelect.~n', []),
-    format(S, '   Estilos ensenados desde la interfaz. Lo lee cargar_aprendizaje/1~n', []),
-    format(S, '   (no se consulta directamente). */~n~n', []),
+    escribir_cabecera(S),
     forall(estilo_aprendido(Id),
            ( forall(hecho_de_estilo(Id, H), portray_clause(S, H)),
-             nl(S) )).
+             nl(S) )),
+    forall(termino_de_regla(T), portray_clause(S, T)),
+    forall(termino_de_sinonimo(T), portray_clause(S, T)).
+
+/* termino_de_regla(-T): explicacion y clausula de cada regla experta, en
+   el orden en que se ensenaron. */
+termino_de_regla(T) :-
+    clause(regla_experta(Id, E, Ef, P, R), B),
+    ( T = explicacion_regla(Id, Ex), explicacion_regla(Id, Ex)
+    ; T = (regla_experta(Id, E, Ef, P, R) :- B) ).
+
+termino_de_sinonimo(T) :-
+    lexico_aprendido(Toks),
+    lexico(Toks, R, P),
+    ( T = lexico_aprendido(Toks) ; T = lexico(Toks, R, P) ).
+
+/* anexar_aprendizaje(+Terminos): agrega terminos al FINAL del archivo
+   activo (modo append) con escritura atomica: se copia el archivo a un
+   .tmp, se anexa ahi, se guarda .bak del original y el .tmp lo reemplaza.
+   Si el archivo no existe se crea con su cabecera. */
+anexar_aprendizaje(Terminos) :-
+    ruta_aprendizaje(Ruta),
+    anexar_aprendizaje(Ruta, Terminos).
+
+anexar_aprendizaje(Ruta, Terminos) :-
+    atom_concat(Ruta, '.tmp', Tmp),
+    preparar_temporal(Ruta, Tmp),
+    setup_call_cleanup(open(Tmp, append, S, [encoding(utf8)]),
+                       ( nl(S), forall(member(T, Terminos), portray_clause(S, T)) ),
+                       close(S)),
+    reemplazar_archivo(Tmp, Ruta).
+
+preparar_temporal(Ruta, Tmp) :-
+    exists_file(Ruta), !,
+    copy_file(Ruta, Tmp).
+preparar_temporal(_, Tmp) :-
+    setup_call_cleanup(open(Tmp, write, S, [encoding(utf8)]),
+                       escribir_cabecera(S),
+                       close(S)).
+
+/* persistir_o_deshacer(+Escribir, +Deshacer, +Ok, -Resultado): ejecuta la
+   escritura en disco; si falla o lanza excepcion, deshace lo hecho en
+   memoria y devuelve error(persistencia(Motivo)). Asi memoria y archivo
+   no difieren nunca. */
+persistir_o_deshacer(Escribir, Deshacer, Ok, Resultado) :-
+    catch(( call(Escribir) -> Res = Ok ; Res = error(persistencia(fallo)) ),
+          E,
+          ( message_to_codes_seguro(E, Txt), Res = error(persistencia(Txt)) )),
+    ( Res = error(_) -> call(Deshacer) ; true ),
+    Resultado = Res.
+
+message_to_codes_seguro(E, Txt) :-
+    catch(term_to_atom(E, Txt), _, Txt = excepcion).
 
 /* hecho_de_estilo(+Id, -Hecho): todos los hechos que describen un estilo. */
 hecho_de_estilo(Id, estilo_aprendido(Id)).
@@ -1339,7 +1546,40 @@ incorporar_terminos(Ts) :-
             ( member(estilo_aprendido(Id), Ts), atom(Id), \+ estilo(Id, _) ),
             Ids0),
     list_to_set(Ids0, Ids),
-    forall(member(Id, Ids), incorporar_estilo(Id, Ts)).
+    forall(member(Id, Ids), incorporar_estilo(Id, Ts)),
+    incorporar_reglas(Ts),          % despues de los estilos: una regla puede
+    incorporar_sinonimos(Ts).       % hablar de un estilo aprendido
+
+/* incorporar_reglas(+Ts): una regla del archivo se acepta solo si su cuerpo
+   tiene EXACTAMENTE la forma que construye construir_clausula/8 (se
+   reconoce por unificacion, NUNCA se ejecuta el cuerpo leido) y si pasa la
+   misma validacion que ensenar_regla/8. La clausula se vuelve a construir
+   desde los datos validados. Lo que no cumple se ignora. */
+incorporar_reglas(Ts) :-
+    forall(( member((H :- B), Ts),
+             H = regla_experta(Id, E, Ef, P, R),
+             cuerpo_regla(B, R, Conds, Excls),
+             memberchk(explicacion_regla(Id, Ex), Ts) ),
+           incorporar_regla(Id, Ex, E, Ef, P, Conds, Excls)).
+
+incorporar_regla(Id, Ex, E, Ef, P, Conds, Excls) :-
+    preparar_regla(Id, Ex, E, Ef, P, Conds, Excls, Datos, Error),
+    Error == ninguno, !,
+    registrar_regla(Datos).
+incorporar_regla(_, _, _, _, _, _, _).
+
+/* incorporar_sinonimos(+Ts): un sinonimo se acepta si esta marcado como
+   aprendido, sus tokens son atomos o enteros, apunta a un requisito
+   conocido, tiene polaridad valida y la frase no existe ya en el lexico. */
+incorporar_sinonimos(Ts) :-
+    forall(( member(lexico_aprendido(T), Ts),
+             is_list(T), T \== [],
+             forall(member(X, T), ( atom(X) ; integer(X) )),
+             memberchk(lexico(T, R, P), Ts),
+             requisito_conocido(R),
+             memberchk(P, [afirma, niega]),
+             \+ lexico(T, _, _) ),
+           ( assertz(lexico_aprendido(T)), assertz(lexico(T, R, P)) )).
 
 /* incorporar_estilo(+Id, +Ts): un estilo sin nombre valido no se carga
    (2a clausula). El corte de la 1a evita tomar un segundo nombre. */
@@ -1363,3 +1603,219 @@ descripcion_cargada(Id, Ts, D) :-
     member(descripcion_estilo(Id, D), Ts), atom(D), !.
 descripcion_cargada(_, _, D) :-
     descripcion_por_defecto(D).
+
+/* ==========================================================================
+   SECCION 9. MODO EXPERTO: REGLAS INYECTADAS EN CALIENTE (ENTREGABLE 3)
+   El experto describe una regla con datos (id, explicacion, condiciones,
+   exclusiones, efecto, peso y estilo). Python SOLO envia esos datos: aqui
+   se validan y se construye la clausula, que se inserta con assertz/1 y se
+   anexa a conocimiento_aprendido.pl con portray_clause/2. Nunca se ejecuta
+   texto Prolog escrito por el usuario: la clausula se arma con terminos,
+   no con texto, asi que no hay inyeccion posible.
+
+   Forma de cada regla (una CLAUSULA real, no un hecho):
+     regla_experta(Id, Estilo, Efecto, Peso, Reqs) :-
+         contiene_todos([cond1, cond2], Reqs),
+         \+ contiene_alguno([excl1], Reqs).
+   Efecto recomendar: puntaje/3 suma Peso (bonus_reglas/3).
+   Efecto descartar : motivo_descarte/3 excluye el estilo (Peso = 0).
+   ========================================================================== */
+
+/* --- 9.1 Parametros ------------------------------------------------------- */
+peso_regla_minimo(1).
+peso_regla_maximo(5).
+efecto_regla(recomendar).
+efecto_regla(descartar).
+
+/* --- 9.2 Construccion y lectura de la clausula ---------------------------
+   construir_clausula(+Id, +Estilo, +Efecto, +Peso, +Conds, +Excls, -Clausula)
+   Sin exclusiones no se agrega el \+ (cuerpo mas simple). Corte = clausulas
+   excluyentes. */
+construir_clausula(Id, E, Ef, P, Conds, [],
+                   (regla_experta(Id, E, Ef, P, R) :- contiene_todos(Conds, R))) :- !.
+construir_clausula(Id, E, Ef, P, Conds, Excls,
+                   (regla_experta(Id, E, Ef, P, R) :-
+                        contiene_todos(Conds, R),
+                        \+ contiene_alguno(Excls, R))).
+
+/* cuerpo_regla(+Cuerpo, +R, -Conds, -Excls): reconoce un cuerpo con la forma
+   exacta de construir_clausula/7 (R debe ser la MISMA variable de la
+   cabeza, por eso ==). Lo usan el listado y la carga del archivo; jamas se
+   llama al cuerpo leido. Corte = la forma sin exclusiones no se reintenta. */
+cuerpo_regla(contiene_todos(C, R0), R, C, []) :-
+    R0 == R, !.
+cuerpo_regla((contiene_todos(C, R0), \+ contiene_alguno(X, R1)), R, C, X) :-
+    R0 == R, R1 == R.
+
+/* --- 9.3 Normalizacion y validacion ------------------------------------
+   preparar_regla(+Id0, +Expl0, +Estilo0, +Efecto0, +Peso0, +Conds0, +Excls0,
+                  -Datos, -Error)
+   Normaliza lo que llega de Python y devuelve el primer error o 'ninguno'.
+   Datos = regla(Id, Expl, Estilo, Efecto, Peso, Conds, Excls). Para
+   "descartar" el peso no se usa y se guarda 0. */
+preparar_regla(Id0, Expl0, E0, Ef0, P0, C0, X0, regla(Id, Ex, E, Ef, P, C, X), Error) :-
+    texto_limpio(Id0, IdT),
+    nombre_a_id(IdT, Id),
+    texto_limpio(Expl0, Ex),
+    atomo_minuscula(E0, E),
+    atomo_minuscula(Ef0, Ef),
+    incompatibles_normalizados(C0, C),
+    incompatibles_normalizados(X0, X),
+    peso_segun_efecto(Ef, P0, P),
+    primer_error_regla(Id, Ex, E, Ef, P, C, X, Error).
+
+peso_segun_efecto(descartar, _, 0) :- !.
+peso_segun_efecto(_, P, P).
+
+/* primer_error_regla(...): validaciones EN ORDEN; cada clausula termina en
+   corte porque la primera que falla decide (son excluyentes por orden).
+   Las \+ se evaluan con los argumentos ya ligados. */
+primer_error_regla('', _, _, _, _, _, _, id_invalido) :- !.
+primer_error_regla(Id, _, _, _, _, _, _, id_duplicado(Id)) :-
+    clause(regla_experta(Id, _, _, _, _), _), !.
+primer_error_regla(Id, _, _, _, _, _, _, id_reservado(Id)) :-
+    ( requisito_conocido(Id) ; estilo(Id, _) ), !.
+primer_error_regla(_, '', _, _, _, _, _, explicacion_vacia) :- !.
+primer_error_regla(_, _, _, _, _, formato_invalido, _, formato_invalido) :- !.
+primer_error_regla(_, _, _, _, _, _, formato_invalido, formato_invalido) :- !.
+primer_error_regla(_, _, _, _, _, C, X, formato_invalido) :-
+    ( memberchk(mal(_), C) ; memberchk(mal(_), X) ), !.
+primer_error_regla(_, _, E, _, _, _, _, estilo_desconocido(E)) :-
+    \+ estilo(E, _), !.
+primer_error_regla(_, _, _, Ef, _, _, _, efecto_invalido(Ef)) :-
+    \+ efecto_regla(Ef), !.
+primer_error_regla(_, _, _, _, _, [], _, sin_condiciones) :- !.
+primer_error_regla(_, _, _, _, _, C, _, requisito_desconocido(R)) :-
+    member(R, C), \+ requisito_conocido(R), !.
+primer_error_regla(_, _, _, _, _, _, X, requisito_desconocido(R)) :-
+    member(R, X), \+ requisito_conocido(R), !.
+primer_error_regla(_, _, _, _, _, C, X, requisito_en_ambas(R)) :-
+    member(R, C), memberchk(R, X), !.
+primer_error_regla(_, _, _, _, _, C, _, condiciones_contradictorias(A, B)) :-
+    member(A, C), member(B, C), excluyentes(A, B), !.
+primer_error_regla(_, _, _, recomendar, P, _, _, peso_invalido(P)) :-
+    \+ peso_regla_valido(P), !.
+primer_error_regla(_, _, E, Ef, _, C, X, regla_repetida(Otra)) :-
+    msort(C, Cs), msort(X, Xs),
+    clause(regla_experta(Otra, E, Ef, _, R), B),
+    cuerpo_regla(B, R, C2, X2),
+    msort(C2, Cs), msort(X2, Xs), !.
+primer_error_regla(_, _, _, _, _, _, _, ninguno).
+
+peso_regla_valido(P) :-
+    integer(P),
+    peso_regla_minimo(Min), peso_regla_maximo(Max),
+    P >= Min, P =< Max.
+
+/* --- 9.4 Ensenar una regla ------------------------------------------------
+   ensenar_regla(+Id, +Explicacion, +Estilo, +Efecto, +Peso, +Condiciones,
+                 +Exclusiones, -Resultado)      Resultado = ok(Id) | error(M)
+   Con error la base no se toca. Si es valida: assertz/1 de la clausula y
+   de su explicacion, y se ANEXA al archivo de aprendizaje; si el disco
+   falla se retracta todo (persistir_o_deshacer/4). */
+ensenar_regla(Id0, Expl0, E0, Ef0, P0, C0, X0, Resultado) :-
+    preparar_regla(Id0, Expl0, E0, Ef0, P0, C0, X0, Datos, Error),
+    aplicar_regla(Error, Datos, Resultado).
+
+aplicar_regla(Error, _, error(Error)) :-
+    Error \== ninguno, !.
+aplicar_regla(ninguno, Datos, Resultado) :-
+    Datos = regla(Id, Ex, E, Ef, P, C, X),
+    registrar_regla(Datos),
+    construir_clausula(Id, E, Ef, P, C, X, Clausula),
+    persistir_o_deshacer(anexar_aprendizaje([explicacion_regla(Id, Ex), Clausula]),
+                         borrar_regla(Id),
+                         ok(Id), Resultado).
+
+/* registrar_regla(+Datos): la clausula se inserta con assertz/1. */
+registrar_regla(regla(Id, Ex, E, Ef, P, C, X)) :-
+    construir_clausula(Id, E, Ef, P, C, X, Clausula),
+    assertz(Clausula),
+    assertz(explicacion_regla(Id, Ex)).
+
+/* --- 9.5 Eliminar ---------------------------------------------------------
+   olvidar_regla(+Id): retract de la clausula y REESCRITURA atomica del
+   archivo sin ella. Falla si no existe esa regla (el corte evita
+   reintentar despues de borrar). */
+olvidar_regla(Id0) :-
+    atomo_minuscula(Id0, Id),
+    clause(regla_experta(Id, _, _, _, _), _), !,
+    borrar_regla(Id),
+    guardar_aprendizaje.
+
+borrar_regla(Id) :-
+    retractall(regla_experta(Id, _, _, _, _)),
+    retractall(explicacion_regla(Id, _)).
+
+/* --- 9.6 Consultas para la interfaz ---------------------------------------
+   reglas_aprendidas(-Lista): [[Id, Estilo, Efecto, Peso, Conds, Excls,
+   Explicacion], ...] leidas de las clausulas mismas (clause/2). */
+reglas_aprendidas(Lista) :-
+    findall([Id, E, Ef, P, C, X, Ex],
+            ( clause(regla_experta(Id, E, Ef, P, R), B),
+              cuerpo_regla(B, R, C, X),
+              explicacion_regla(Id, Ex) ),
+            Lista).
+
+/* reglas_expertas_disparadas(+Reqs, -Lista): [[Id, Estilo, Efecto, Peso,
+   Explicacion], ...] reglas que se disparan con esos requisitos. */
+reglas_expertas_disparadas(Reqs, Lista) :-
+    preparar_requisitos(Reqs, V),
+    findall([Id, E, Ef, P, Ex],
+            ( regla_experta(Id, E, Ef, P, V), explicacion_regla(Id, Ex) ),
+            Lista).
+
+/* clausula_regla_texto(+Id, -Texto): la clausula tal como queda escrita en
+   el archivo (portray_clause/2), para mostrarla en la interfaz. */
+clausula_regla_texto(Id, Texto) :-
+    clause(regla_experta(Id, E, Ef, P, R), B), !,
+    with_output_to(string(Texto),
+                   portray_clause((regla_experta(Id, E, Ef, P, R) :- B))).
+
+/* resumen_aprendizaje(-Estilos, -Reglas, -Sinonimos): cantidades. */
+resumen_aprendizaje(NE, NR, NS) :-
+    aggregate_all(count, estilo_aprendido(_), NE),
+    aggregate_all(count, clause(regla_experta(_, _, _, _, _), _), NR),
+    aggregate_all(count, lexico_aprendido(_), NS).
+
+/* --- 9.7 Mensajes legibles (sin tildes) -----------------------------------
+   mensaje_regla(+Resultado, -Texto). Cortes = clausulas excluyentes. */
+mensaje_regla(ok(Id), T) :- !,
+    format(atom(T), 'Regla "~w" guardada. Ya forma parte del razonamiento y del archivo de aprendizaje.', [Id]).
+mensaje_regla(error(M), T) :-
+    mensaje_error_regla(M, T), !.
+mensaje_regla(R, T) :-
+    format(atom(T), 'Resultado no reconocido: ~w', [R]).
+
+mensaje_error_regla(id_invalido, 'Escriba un identificador para la regla (letras o numeros).').
+mensaje_error_regla(id_duplicado(Id), T) :-
+    format(atom(T), 'Ya existe una regla con el identificador ~w.', [Id]).
+mensaje_error_regla(id_reservado(Id), T) :-
+    format(atom(T), 'El identificador ~w ya es un requisito o un estilo; use otro.', [Id]).
+mensaje_error_regla(explicacion_vacia,
+    'La explicacion es obligatoria: diga en lenguaje claro por que se aplica la regla.').
+mensaje_error_regla(formato_invalido, 'Los datos enviados no tienen el formato esperado.').
+mensaje_error_regla(estilo_desconocido(E), T) :-
+    format(atom(T), 'El estilo ~w no existe en la base.', [E]).
+mensaje_error_regla(efecto_invalido(E), T) :-
+    format(atom(T), 'Efecto invalido: ~w (use recomendar o descartar).', [E]).
+mensaje_error_regla(sin_condiciones, 'Elija al menos una condicion (requisito que debe cumplirse).').
+mensaje_error_regla(requisito_desconocido(R), T) :-
+    format(atom(T), 'El requisito ~w no esta en la base de conocimiento.', [R]).
+mensaje_error_regla(requisito_en_ambas(R), T) :-
+    texto_requisito(R, Tr),
+    format(atom(T), '"~w" esta a la vez en condiciones y en exclusiones.', [Tr]).
+mensaje_error_regla(condiciones_contradictorias(A, B), T) :-
+    format(atom(T), 'Las condiciones ~w y ~w no pueden darse juntas: la regla nunca se dispararia.', [A, B]).
+mensaje_error_regla(peso_invalido(P), T) :-
+    peso_regla_minimo(Min), peso_regla_maximo(Max),
+    format(atom(T), 'El peso debe ser un entero entre ~w y ~w (llego ~w).', [Min, Max, P]).
+mensaje_error_regla(regla_repetida(Otra), T) :-
+    format(atom(T), 'La regla ~w ya tiene las mismas condiciones, exclusiones, efecto y estilo.', [Otra]).
+mensaje_error_regla(persistencia(E), T) :-
+    format(atom(T), 'No se pudo escribir el archivo de aprendizaje (~w). No se guardo nada.', [E]).
+
+/* tipo_resultado_regla(+Resultado, -Tipo): ok | error, sin terminos
+   compuestos para Python. */
+tipo_resultado_regla(ok(_), ok).
+tipo_resultado_regla(error(_), error).

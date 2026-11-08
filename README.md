@@ -1,89 +1,107 @@
-# ArquiSelect — Entregable 2
+# ArquiSelect — Entregable 3
 
-Sistema experto de **caja blanca** que recomienda un estilo de arquitectura de software entre 11 estilos (monolito en capas, monolito modular, microservicios, serverless, orientada a eventos, MVC, Onion, Hexagonal, SOA, Cliente-Servidor y Clean Architecture). Además, el usuario puede enseñarle estilos nuevos desde la interfaz sin reiniciar. Explica paso a paso por qué llegó al dictamen y, cuando la evidencia no alcanza, sugiere qué dato preguntar para desempatar.
+Sistema experto de **caja blanca** (SWI-Prolog + Python/Tkinter con PySwip) que recomienda un estilo de arquitectura de software entre 11 estilos y explica por qué. Este entregable agrega:
 
-- **Capa simbólica (Prolog):** `base_conocimiento.pl`. Aquí está toda la inferencia, la traza de auditoría y el cálculo del desempate.
-- **Capa imperativa (Python):** `main.py`. Contiene la aplicación de escritorio en Tkinter y el controlador PySwip. Solo captura y limpia las entradas, consulta y muestra.
+- **(A) Lenguaje natural con DCG:** el usuario describe su proyecto con sus palabras y Prolog lo traduce a requisitos.
+- **(B) Modo Experto:** reglas lógicas, arquitecturas y vocabulario nuevos que se inyectan en caliente con `assertz` y quedan guardados en disco.
+- **(C) Pruebas y evidencia:** `pruebas_entregable3.py` → `evidencia_entregable3.txt`.
+
+**Regla del proyecto:** toda la lógica vive en Prolog. Python solo envía datos, invoca predicados y muestra respuestas.
+
+## Ejecución
+
+Requisitos: Python 3.9+, SWI-Prolog 9.x en el PATH (misma arquitectura de 64 bits) y `pip install pyswip`.
+
+```bash
+python main.py                    # aplicación
+python pruebas_entregable3.py     # pruebas del entregable 3 (también corre pruebas.py)
+python pruebas.py                 # pruebas del entregable 2
+python motor.py                   # versión por consola del entregable 1
+```
+
+## Roles y PIN
+
+En la pantalla de **Inicio** está el selector **ROL: 👤 Usuario / 🛡 Experto**. El rol actual aparece en el encabezado de todas las vistas.
+
+- **Usuario** (por defecto): evaluación, historial y recarga de la base. No tiene acceso al Modo Experto.
+- **Experto:** al elegirlo se pide un PIN. El PIN por defecto es **`experto2026`**. Se puede cambiar definiendo la variable de entorno `ARQUISELECT_PIN` antes de abrir la app, por ejemplo `set ARQUISELECT_PIN=otroPin` en Windows. Con el rol Experto aparece la tarjeta **Modo Experto** en Inicio, y el botón *Crear arquitectura nueva…* de la evaluación abre esa vista.
+
+> ⚠ **Es un control de acceso de demostración, no seguridad real.** El hash SHA-256 del PIN está en `main.py` y quien tenga acceso a los archivos puede cambiarlo o editar el `.pl` directamente.
 
 ## Archivos
 
 | Archivo | Contenido |
 |---|---|
-| `main.py` | Aplicación de escritorio multi-vista (Tkinter), persistencia de evaluaciones en JSON (`GestorHistorial`) y clase `PuenteProlog`, que hace todas las consultas a SWI-Prolog. |
-| `base_conocimiento.pl` | Hechos y reglas del Entregable 1, más las secciones 5 (explicabilidad), 6 (recomendación) y 7 (apoyo a la interfaz). |
-| `motor.py` | Versión por consola del Entregable 1. Sigue funcionando igual (también carga lo aprendido). |
-| `pruebas.py` | Pruebas automáticas (`python pruebas.py`). Regenera `evidencia_pruebas.txt`. |
-| `conocimiento_aprendido.pl` | Estilos enseñados desde la app. Lo escribe y lo lee Prolog (`guardar_aprendizaje/0`, `cargar_aprendizaje/1`); se crea al guardar el primero. |
-| `historial_evaluaciones.json` | Registro de consultas anteriores guardadas en disco. |
-| `DICCIONARIO_PREDICADOS.md` / `.pdf` | Documentación de los predicados nuevos. |
+| `main.py` | Aplicación Tkinter: `VistaInicio` (rol), `VistaEvaluacion` (texto libre, casillas, preguntas guiadas, resumen y *¿Por qué?*), `VistaModoExperto` (4 pestañas) y `VistaHistorial`. Incluye `PuenteProlog`, que hace todas las consultas. |
+| `base_conocimiento.pl` | Hechos y reglas (secciones 1-8 de los entregables 1 y 2). La **sección 9** contiene las reglas expertas (`ensenar_regla/8`). Carga `lenguaje_natural.pl`. |
+| `lenguaje_natural.pl` | Normalizador, gramática DCG, léxico (`lexico/3`), umbrales numéricos y sinónimos en caliente. |
+| `conocimiento_aprendido.pl` | Lo enseñado en el Modo Experto: estilos, reglas (cláusulas escritas con `portray_clause/2`) y sinónimos. Se crea al guardar lo primero. Cada escritura es atómica (`.tmp` + `rename`) y deja una copia `.bak`. Si está dañado, la app arranca igual y avisa. |
+| `pruebas_entregable3.py` / `evidencia_entregable3.txt` | Pruebas del entregable 3 y su salida real. |
+| `pruebas.py` / `evidencia_pruebas.txt` | Pruebas del entregable 2 (siguen pasando). |
+| `motor.py` | Consola del entregable 1. |
+| `historial_evaluaciones.json` | Evaluaciones guardadas. |
 
-## Requisitos
+## Qué entiende la caja "Describe tu proyecto"
 
-1. **Python 3.9 o superior.**
-2. **SWI-Prolog 9.x**, desde https://www.swi-prolog.org/download/stable
-   - En Windows, durante la instalación marque la opción **"Add swipl to the system PATH"**.
-   - SWI-Prolog y Python deben ser de la misma arquitectura (los dos de 64 bits).
-3. Librería de Python (Tkinter ya viene incluido con Python en Windows):
+Escriba en la tarjeta **DESCRIBE TU PROYECTO** y pulse **🔎 Interpretar**. Pasa lo siguiente:
 
-```bash
-pip install pyswip
-```
+1. Se marcan las casillas de los requisitos entendidos.
+2. Lo negado pasa a "No aplica" y arrancan las preguntas guiadas.
+3. Aparecen las líneas **✔ Entendí** y **⚠ No entendí**.
+4. **Ver análisis sintáctico** muestra el árbol de la DCG.
 
-## Ejecución
+Interpretar de nuevo reemplaza lo detectado antes.
 
-Desde la carpeta del proyecto:
+La gramática divide el texto en *sintagmas*. Cada sintagma tiene conectores opcionales (`y, e, o, además, también, con, pero, ","`), una negación opcional (`no, sin, ni, tampoco, nunca`), rellenos que se omiten (artículos, verbos comunes y sustantivos genéricos como *el equipo* o *la aplicación*) y un núcleo. Mayúsculas, tildes y signos no importan.
 
-```bash
-python main.py
-```
-
-Se abre la ventana de ArquiSelect.
-
-### Problemas comunes
-
-| Síntoma | Solución |
+| Requisito | Ejemplos de formulaciones (hay más en `lenguaje_natural.pl`) |
 |---|---|
-| `SwiPrologNotFoundError` o `libswipl not found` | SWI-Prolog no está en el PATH. Reinstálelo marcando la opción del PATH, o defina la variable `SWI_HOME_DIR` con la carpeta de instalación (por ejemplo `C:\Program Files\swipl`). |
-| La app no refleja un cambio en el `.pl` | Use el botón **Recargar .pl** del panel izquierdo. Vuelve a consultar el archivo sin reiniciar. |
-| `No module named 'tkinter'` | Reinstale Python desde python.org dejando marcada la opción "tcl/tk and IDLE". |
+| equipo_pequeno | equipo pequeño/reducido/chico, pocos desarrolladores, **equipo de 3 personas**, **somos 4** (< 5) |
+| equipo_grande | equipo grande/numeroso, varios equipos, **equipo de 20 personas** (≥ 10) |
+| sin_experiencia_devops | sin experiencia en devops, no tiene/tenemos experiencia en devops, no sabemos devops |
+| presupuesto_bajo | poco presupuesto, presupuesto limitado/ajustado/bajo, bajo presupuesto, pocos recursos, poco dinero |
+| entrega_rapida | entregar rápido/pronto, entrega rápida, poco tiempo, plazo corto, cuanto antes, **entregar en 3 semanas** (≤ 6) |
+| muchos_usuarios | muchos usuarios (al mismo tiempo), miles de usuarios, alto tráfico, **más de 1000 usuarios**, **10 mil usuarios** |
+| carga_variable | carga variable, picos de demanda/tráfico, demanda impredecible |
+| procesos_largos | procesos largos, tareas largas/pesadas, procesamiento por lotes |
+| latencia_critica | baja latencia, tiempo real, respuesta inmediata, **responder en menos de 100 ms** |
+| disponibilidad_alta | alta disponibilidad, disponible las 24 horas, 24/7, sin caídas, tolerante a fallos |
+| despliegue_independiente | despliegue independiente, desplegar (partes) por separado |
+| dominio_complejo | dominio complejo, muchas reglas de negocio, lógica de negocio compleja |
+| integracion_asincrona | comunicación asíncrona, colas de mensajes, mensajería, eventos |
+| consistencia_estricta | consistencia estricta/fuerte, transacciones, integridad de datos |
+| mantenibilidad_largo_plazo | largo plazo, fácil de mantener, muchos años, mantenibilidad |
+| testabilidad_alta | pruebas automáticas/unitarias, fácil de probar, testabilidad |
+| independencia_tecnologica | cambiar la base de datos, cambiar el framework, sin reescribir todo |
+| integracion_sistemas_heredados | sistemas heredados/legados/legacy/existentes |
+| separar_interfaz_logica | separar interfaz y lógica, separación de responsabilidades, modelo vista controlador |
+| datos_centralizados | datos centralizados, base de datos central, servidor central, varios clientes |
 
-## Cómo se usa la interfaz
+Las frases en **negrita** son **frases numéricas**: la regla aritmética se evalúa dentro de la DCG y los umbrales están en `umbral_numerico/3`. Se aceptan números escritos con letras (*tres*, *veinte*, *diez mil*).
 
-- **Vista Inicio:** Menú principal con accesos rápidos a *Nueva Evaluación de Arquitectura*, *Historial de Evaluaciones* y *Recargar Base de Conocimiento*.
-- **Vista Evaluación:**
-  - **Panel izquierdo:** casillas de requisitos agrupadas por categoría (salen dinámicamente de `requisitos_disponibles/1`), botones de ejemplos rápidos (*Startup*, *Alta Demanda*, *Empresarial*), bloque **Otros requisitos** con el botón *Crear arquitectura nueva…*, y botón para guardar en historial.
-  - **Tarjetas superiores:** estilo arquitectónico recomendado, descripción detallada, chips de prioridad (severidad), riesgo y confianza, junto con la tarjeta interactiva de desempate (*¿Qué falta?*).
-  - **Pestaña "Resumen & Ranking":** gráfico comparativo de barras con las puntuaciones de cada estilo y explicación clara en lenguaje natural (atributos a favor, penalizaciones y alternativas descartadas).
-  - **Pestaña "¿Por qué?":** traza exacta de inferencia devuelta por Prolog (reglas disparadas por nivel en árbol, hechos comprobados y alternativas descartadas).
-  - **Pestaña "¿Qué falta?":** estado del dictamen, hipótesis en competencia y listado completo de preguntas con poder de desempate calculado por Prolog.
-  - **Pestaña "Consulta a Prolog":** metas exactas enviadas y respuesta cruda en formato Prolog para auditoría técnica.
-- **Vista Crear arquitectura nueva:** nombre, descripción corta y la lista de requisitos con las columnas *Favorece* (con peso 1-3) e *Incompatible*. Prolog valida y guarda; el estilo nuevo compite de inmediato en el dictamen, la comparativa y las preguntas guiadas. Abajo se listan las arquitecturas aprendidas con su botón 🗑. *Volver a la evaluación* conserva lo que ya estaba marcado y respondido.
-- **Vista Historial:** Tabla con las evaluaciones generadas, fecha, requisitos ingresados, estilo dictaminado, prioridad y estado, persistido en `historial_evaluaciones.json`.
+**Negaciones:**
 
-## Decisiones técnicas
+- *"No necesitamos alta disponibilidad"* → `disponibilidad_alta` va a **Negados**.
+- *"Sin experiencia en DevOps"* sí es un requisito, porque el léxico se prueba antes que la negación.
+- Algunas frases niegan por sí mismas (polaridad `niega`): *carga estable*, *pocos usuarios*, *presupuesto amplio*, *sin prisa*.
 
-- **Sin bloqueos.** Prolog nunca usa `read/1`: los datos llegan como argumentos de la consulta y la respuesta vuelve completa, así que la ventana no se queda esperando una entrada. Cada cambio en una casilla dispara la consulta y la ventana se actualiza al instante.
-- **Entradas seguras.** Python envía cada requisito como átomo entre comillas simples, de modo que nunca puede llegar como variable libre. Además, Prolog vuelve a validar con `validar_entrada/2` (`is_list/1`, `ground/1`, `atom/1`, `downcase_atom/2`).
-- **Textos sin tildes en el `.pl`.** Las etiquetas y preguntas de la base no llevan tildes para evitar problemas de codificación al pasar por pyswip en Windows. Las tildes se ponen en la capa de presentación.
+## Modo Experto (pestañas)
 
-## División de roles
+1. **Regla nueva:** id, explicación (obligatoria), condiciones (que deben cumplirse), exclusiones (traducidas a `\+`), efecto (*recomendar* con +1 a +5 o *descartar*) y estilo afectado. Python envía solo esos datos. Prolog valida (id repetido, estilo existente, requisitos existentes, al menos una condición, peso entre 1 y 5, sin solapes) y construye la cláusula `regla_experta/5`, que se inserta con `assertz` y se anexa al archivo. Nunca se ejecuta texto Prolog escrito por el usuario.
+2. **Arquitectura nueva:** el formulario de estilos nuevos del entregable 2.
+3. **Vocabulario:** frase → requisito (afirma/niega). La caja de texto la entiende de inmediato, sin reiniciar.
+4. **Reglas y conocimiento aprendido:** reglas, estilos y sinónimos aprendidos, cada uno con 🗑 y confirmación.
 
-- **Integrante A (Ingeniero del Conocimiento y Motor Simbólico):** secciones 5 a 7 de `base_conocimiento.pl`, es decir, la traza (`regla_disparada/3`), las hipótesis descartadas (`hipotesis_descartada/3`) y el desempate (`que_falta/5`, `poder_desempate/5`).
-- **Integrante B (Ingeniero de Integración y Explicabilidad):** `main.py`, con el puente `PuenteProlog`, la ventana en Tkinter y los paneles "¿Por qué?" y "¿Qué falta?".
+Las reglas disparadas suman su bonus en `puntaje/3` o descartan el estilo en `motivo_descarte/3`. Ranking, candidatos, descartes, *¿Qué falta?* y la sección **¿Por qué? (auditoría)** las muestran sin reiniciar.
 
-## Guion para el video (3 a 5 minutos)
+## Guion de demostración
 
-**Caso 1 — Inferencia completa y "¿Por qué?"**
+1. **Rol Usuario.** Escriba *"somos un equipo de tres personas con poco presupuesto y necesitamos entregar rapido"* y pulse **Interpretar**. Se marcan 3 casillas y arrancan las preguntas guiadas. Abra **Ver análisis sintáctico**.
+2. **Rol Experto (PIN `experto2026`).** En **Modo Experto → Regla nueva** cree `mvc_para_equipos_pequenos`:
+   - condiciones: *Equipo reducido* y *Separar interfaz de usuario y lógica*
+   - exclusión: *Dominio complejo*
+   - efecto: recomendar +3, estilo MVC
 
-1. Marque *Equipo reducido*, *Presupuesto bajo* y *Hay que entregar en poco tiempo*.
-2. Muestre el dictamen: **Monolito en capas**, prioridad **alta**, riesgo bajo, confianza alta, dictamen definitivo.
-3. Abra **¿Por qué?** y recorra los niveles 1, 2 y 3. Señale la regla `estilo_viable/2 (\+)` y el cálculo `puntaje de monolito_capas = 9 - 0 = 9`.
-4. Muestre las hipótesis descartadas: **Microservicios** por condición excluyente (`equipo_pequeno`) y **Orientada a eventos** sin evidencia (−2).
-
-**Caso 2 — Datos incompletos y "¿Qué falta?"**
-
-1. Pulse **Limpiar** y marque solo *Muchos usuarios concurrentes* y *Carga variable o impredecible*.
-2. Aparece **empate técnico**: Serverless con 6 puntos contra Microservicios con 5, confianza media.
-3. Abra **¿Qué falta?**. Compiten Serverless y Microservicios, y la primera pregunta es *"¿El equipo de desarrollo tiene menos de 5 personas?"* con poder 7: Serverless sube 2 puntos y Microservicios se descarta.
-4. Pulse **"Sí, aplica: agregar este dato"**. Ahora el dictamen es **Serverless** con 8 puntos, prioridad alta y dictamen definitivo, y Microservicios aparece en descartadas.
-5. Como cierre opcional, pruebe con un solo requisito (*Muchos usuarios*) para mostrar el estado de evidencia insuficiente.
+   Con esas dos casillas, MVC pasa de 5 a 8 puntos y queda primero. En **Resumen → ¿Por qué? (auditoría)** aparece la regla.
+3. Cierre la app y vuelva a abrirla: la regla sigue cargada (`conocimiento_aprendido.pl`).
+4. Elimine la regla desde **Reglas y conocimiento aprendido**.

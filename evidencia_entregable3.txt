@@ -1,0 +1,239 @@
+==============================================================================
+EVIDENCIA DE PRUEBAS - ArquiSelect ENTREGABLE 3 (DCG + Modo Experto + persistencia)
+Fecha: 2026-11-08 01:29:52   Python 3.13.14   pyswip 0.3.3   SO Windows 11
+SWI-Prolog 100002   Archivo de aprendizaje de pruebas: <temporal>/aprendizaje_pruebas.pl
+==============================================================================
+
+[A1] Casos minimos a-i del enunciado
+   OK     a) 'Somos un equipo de tres personas con poco presupuesto y necesitamos entregar rapido': (['equipo_pequeno', 'presupuesto_bajo', 'entrega_rapida'], [], [])
+          por que : (Requisitos, Negados, NoEntendido)
+   OK     b) 'La aplicacion tendra muchos usuarios al mismo tiempo y debe estar disponible las 24 horas': (['muchos_usuarios', 'disponibilidad_alta'], [], [])
+          por que : (Requisitos, Negados, NoEntendido)
+   OK     c) 'El equipo no tiene experiencia en DevOps': (['sin_experiencia_devops'], [], [])
+          por que : (Requisitos, Negados, NoEntendido)
+   OK     d) 'No necesitamos alta disponibilidad': ([], ['disponibilidad_alta'], [])
+          por que : (Requisitos, Negados, NoEntendido)
+   OK     e) 'Equipo de 20 personas y dominio complejo con muchas reglas de negocio': (['equipo_grande', 'dominio_complejo'], [], [])
+          por que : (Requisitos, Negados, NoEntendido)
+   OK     f) 'Necesitamos poder cambiar la base de datos sin reescribir todo': (['independencia_tecnologica'], [], [])
+          por que : (Requisitos, Negados, NoEntendido)
+   OK     g) 'asdf qwerty': ([], [], ['asdf', 'qwerty'])
+          por que : (Requisitos, Negados, NoEntendido)
+   OK     h1) '': ([], [], [])
+          por que : (Requisitos, Negados, NoEntendido)
+   OK     h2) '   ': ([], [], [])
+          por que : (Requisitos, Negados, NoEntendido)
+   OK     i) 'PRESUPUESTO LIMITADO Y ENTREGA RÁPIDA': (['presupuesto_bajo', 'entrega_rapida'], [], [])
+          por que : (Requisitos, Negados, NoEntendido)
+
+[A2] c) 'sin experiencia en DevOps' es un requisito, NO una negacion
+   OK     no aparece en Negados: False
+          por que : lexico/3 la marca con polaridad afirma y se prueba ANTES que la negacion
+   OK     arbol: frase lexica, sin nodo de negacion: ['frase lexica: "no tiene experiencia en devops" -> sin_experiencia_devops (afirma)']
+   OK     variante con 'sin': (['sin_experiencia_devops'], [])
+
+[A3] d) negacion gramatical en el arbol
+   OK     arbol: ['oracion', '  sintagma 1', '    negacion: no', '    relleno: necesitamos', '    frase lexica: "alta disponibilidad" -> disponibilidad_alta (afirma)', '    => disponibilidad_alta NEGADO']
+          por que : sintagma = negacion opcional + rellenos + nucleo
+
+[A4] h) entradas vacias o no textuales nunca lanzan excepcion
+   OK     atomo vacio: ([], [], [])
+          por que : listas vacias
+   OK     string vacio: ([], [], [])
+          por que : listas vacias
+   OK     solo signos de puntuacion: ([], [], [])
+          por que : listas vacias
+   OK     numero: ([], [], [])
+          por que : listas vacias
+   OK     variable libre: ([], [], [])
+          por que : listas vacias
+   OK     termino compuesto: ([], [], [])
+          por que : listas vacias
+   OK     simbolos raros -> NoEntendido: ([], ['@@', '##'])
+
+[A5] Atomo y string dan el mismo resultado
+   OK     atomo == string: (['equipo_pequeno', 'presupuesto_bajo', 'entrega_rapida'], [], [])
+
+[A6] Frases numericas, polaridad 'niega', negacion 'ni', doble negacion y ultima mencion
+   OK     'carga estable y pocos usuarios': ([], ['carga_variable', 'muchos_usuarios'])
+          por que : polaridad 'niega' en el lexico
+   OK     'no necesitamos alta disponibilidad ni despliegue independiente': ([], ['disponibilidad_alta', 'despliegue_independiente'])
+          por que : 'ni' es otra negacion
+   OK     'no tenemos carga estable': (['carga_variable'], [])
+          por que : doble negacion afirma
+   OK     'poco presupuesto pero presupuesto amplio': ([], ['presupuesto_bajo'])
+          por que : si un requisito se menciona dos veces gana la ultima mencion
+   OK     'sin caidas': (['disponibilidad_alta'], [])
+          por que : frase lexica que empieza con 'sin' (no es negacion)
+   OK     'equipo de 7 personas': ([], [])
+          por que : 5 <= 7 < 10: no cumple ningun umbral
+   OK     'somos 4': (['equipo_pequeno'], [])
+          por que : 4 < 5
+   OK     'somos 12 desarrolladores': (['equipo_grande'], [])
+          por que : 12 >= 10
+   OK     '500 usuarios': ([], [])
+          por que : 500 < 1000
+   OK     'mas de 1000 usuarios': (['muchos_usuarios'], [])
+          por que : 1000 >= 1000
+   OK     '10 mil usuarios concurrentes': (['muchos_usuarios'], [])
+          por que : 10 mil = 10000
+   OK     'miles de usuarios': (['muchos_usuarios'], [])
+          por que : frase lexica
+   OK     'responder en menos de 100 ms': (['latencia_critica'], [])
+          por que : 100 <= 100 ms
+   OK     'respuesta en 2 segundos': ([], [])
+          por que : 2000 ms > 100 ms
+   OK     'entregar en 3 semanas': (['entrega_rapida'], [])
+          por que : 3 <= 6 semanas
+   OK     'salir en 30 dias': (['entrega_rapida'], [])
+          por que : 30 dias -> 5 semanas
+   OK     'entregar en 6 meses': ([], [])
+          por que : 6 meses -> 24 semanas > 6
+   OK     'disponible 24/7, legacy y transacciones': (['disponibilidad_alta', 'integracion_sistemas_heredados', 'consistencia_estricta'], [])
+          por que : signos separan tokens
+
+[A7] Umbrales como hechos: cambiar umbral_numerico/3 cambia el resultado
+   OK     con umbral 5: []
+          por que : 7 no es < 5
+   OK     con umbral 8: ['equipo_pequeno']
+          por que : 7 < 8
+   OK     umbral restaurado: []
+
+[A8] Lexico: los 20 requisitos tienen al menos 3 formulaciones (afirma)
+   OK     requisitos: 20
+   OK     con menos de 3 formulaciones: {}
+   OK     entradas de lexico/3: True
+          por que : 162 frases
+
+[A9] j) Sinonimo agregado en caliente: 'recursos escasos' -> presupuesto_bajo
+   OK     antes: ([], ['recursos', 'escasos'])
+   OK     ensenar_sinonimo/3: 'ok([recursos,escasos])'
+   OK     despues (sin reiniciar): ['presupuesto_bajo']
+   OK     duplicado (mayusculas/espacios): 'error(ya_existe(presupuesto_bajo))'
+          por que : misma normalizacion
+   OK     conflicto con el lexico: 'error(conflicto(presupuesto_bajo))'
+   OK     solo palabras funcionales: 'error(frase_solo_funcional)'
+   OK     escrito en el archivo: True
+
+[B1] La regla del demo cambia el ranking sin reiniciar
+   OK     ranking sin regla: [('monolito_capas', 5), ('mvc', 5)]
+          por que : empate 5-5, orden alfabetico
+   OK     ensenar_regla/8: 'ok(mvc_para_equipos_pequenos)'
+   OK     ranking con regla: [('mvc', 8), ('monolito_capas', 5)]
+          por que : mvc 5 + 3
+   OK     es una clausula con cuerpo (clause/2): True
+   OK     exclusion (\+) impide el disparo: True
+          por que : con dominio_complejo: [('monolito_modular', 7)]
+   OK     clausula escrita con portray_clause: True
+          por que : regla_experta(mvc_para_equipos_pequenos, mvc, recomendar, 3, A) :-
+    contiene_todos([equipo_pequeno, separar_interfaz_logica], A),
+    \+ contiene_alguno([dominio_complejo], A).
+
+[B2] razones/3 y explicar_diagnostico/5 incluyen la regla experta
+   OK     mejor: 'mvc'
+   OK     razones: ['Regla experta mvc_para_equipos_pequenos: Para equipos pequenos que separan interfaz y logica, MVC es suficiente (+3)']
+   OK     paso regla_experta/5 en el nivel 2: [2]
+   OK     puntaje/3 muestra el bonus: ['puntaje de mvc = 5 - 0 + 3 (reglas expertas) = 8']
+
+[B3] Efecto 'descartar': descartes, motivo_descarte y que_falta
+   OK     soa era candidato: True
+          por que : interoperabilidad 3 - presupuesto 2 = 1
+   OK     resultado: 'ok(soa_no_para_presupuesto_bajo)'
+          por que : el peso se ignora en 'descartar' (queda 0)
+   OK     soa ya no es candidato: False
+   OK     descartes: [['soa', 'regla_experta', 'soa_no_para_presupuesto_bajo']]
+   OK     que_falta: efecto del dato: ('resta', -2, 'descarta', -5)
+          por que : peso_exclusion = 5
+   OK     hipotesis descartada: ['condicion excluyente: regla experta soa_no_para_presupuesto_bajo']
+
+[B4] Validaciones negativas de ensenar_regla/8 (la base y el archivo no cambian)
+   OK     id duplicado: 'error(id_duplicado(mvc_para_equipos_pequenos))'
+   OK     estilo inexistente: 'error(estilo_desconocido(estilo_que_no_existe))'
+   OK     sin condiciones: 'error(sin_condiciones)'
+   OK     solape condicion/exclusion: 'error(requisito_en_ambas(equipo_pequeno))'
+   OK     peso 0: 'error(peso_invalido(0))'
+   OK     peso 6: 'error(peso_invalido(6))'
+   OK     peso no numerico: 'error(peso_invalido(alto))'
+   OK     explicacion vacia: 'error(explicacion_vacia)'
+   OK     requisito desconocido: 'error(requisito_desconocido(volar))'
+   OK     efecto invalido: 'error(efecto_invalido(borrar))'
+   OK     id vacio: 'error(id_invalido)'
+   OK     id = requisito: 'error(id_reservado(equipo_pequeno))'
+   OK     condiciones contradictorias: 'error(condiciones_contradictorias(equipo_pequeno,equipo_grande))'
+   OK     regla repetida con otro id: 'error(regla_repetida(mvc_para_equipos_pequenos))'
+   OK     los errores no agregan reglas: 1
+   OK     el archivo no cambia con errores: True
+   OK     texto Prolog como id: se normaliza, no se ejecuta: 'ok(x_halt_y)'
+          por que : nombre_a_id/2; la clausula se arma con terminos, no con texto
+
+[B5] Regla sobre un estilo aprendido; olvidar el estilo borra sus reglas
+   OK     resultado: 'ok(ligero_rapido)'
+   OK     puntaje: 8
+          por que : simplicidad 3 + bonus 5
+   OK     regla borrada con el estilo: 0
+   OK     archivo sin la regla: False
+
+[C1] Regla + sinonimo sobreviven a un PROCESO NUEVO y se eliminan
+   OK     proceso distinto: True
+          por que : pid hijo 28588
+   OK     hijo 1: regla cargada: ['mvc_para_equipos_pequenos']
+   OK     hijo 1: sinonimo cargado: [['recursos escasos', 'presupuesto_bajo', 'afirma']]
+   OK     hijo 1: ranking cambia por la regla: [('mvc', 8), ('monolito_capas', 5)]
+   OK     hijo 1: entiende el sinonimo: ['presupuesto_bajo']
+   OK     eliminar (retract + reescritura): (True, True)
+   OK     hijo 2: nada cargado: ([], [])
+   OK     hijo 2: ranking inicial: [('monolito_capas', 5), ('mvc', 5)]
+   OK     hijo 2: ya no entiende el sinonimo: []
+   OK     existe la copia .bak: True
+   OK     no quedan .tmp: False
+          por que : rename_file atomico
+
+[C2] Archivo de aprendizaje danado o manipulado: la app arranca igual
+   OK     estado: 'cargado'
+   OK     solo la regla valida: ['r_buena']
+          por que : cuerpo distinto, peso 99 o sin explicacion se ignoran
+   OK     sinonimos invalidos ignorados: []
+          por que : requisito desconocido / lexico sin marca
+   OK     el lexico del experto no se pisa: ['equipo_pequeno']
+   OK     archivo con error de sintaxis: 'danado'
+          por que : se renombra a .danado (aviso existente)
+   OK     la inferencia sigue: 'monolito_capas'
+
+[C3] limpiar_aprendizaje/1 se niega a borrar el archivo real
+   OK     limpiar_aprendizaje(real) falla: None
+   OK     la ruta activa sigue siendo la temporal: '<temporal>/aprendizaje_pruebas.pl'
+
+[D1] Una regla que NO se dispara no cambia el dictamen ni la explicacion
+   OK     caso ['equipo_pequeno', 'presupuesto_bajo', 'entrega_rapida']: True
+          por que : diagnostico, estado, competencia, candidatos, descartes y explicacion identicos
+   OK     caso ['muchos_usuarios', 'carga_variable']: True
+          por que : diagnostico, estado, competencia, candidatos, descartes y explicacion identicos
+   OK     caso []: True
+          por que : diagnostico, estado, competencia, candidatos, descartes y explicacion identicos
+   OK     caso ['procesos_largos', 'latencia_critica']: True
+          por que : diagnostico, estado, competencia, candidatos, descartes y explicacion identicos
+   OK     caso ['equipo_grande', 'dominio_complejo']: True
+          por que : diagnostico, estado, competencia, candidatos, descartes y explicacion identicos
+   OK     caso ['equipo_pequeno', 'separar_interfaz_logica']: True
+          por que : diagnostico, estado, competencia, candidatos, descartes y explicacion identicos
+
+[D2] pruebas.py (entregable 2) sigue pasando
+   OK     codigo de salida: 0
+          por que : RESULTADO: 120/120 verificaciones correctas, 0 fallas.
+   OK     0 fallas: True
+
+[Z] OK     conocimiento_aprendido.pl real intacto durante las pruebas
+
+==============================================================================
+RESULTADO: 118/118 verificaciones correctas, 0 fallas.
+
+TAMANO DE LA BASE (sin lo aprendido; cada clausula contada en su archivo de origen):
+   base_conocimiento.pl:
+      hechos (clausulas sin cuerpo) ... 301  en 69 predicados
+      reglas (clausulas con cuerpo) ... 240  en 137 predicados
+      predicados distintos ............ 165
+   lenguaje_natural.pl:
+      hechos (clausulas sin cuerpo) ... 236  en 23 predicados
+      reglas (clausulas con cuerpo) ... 130  en 67 predicados
+      predicados distintos ............ 77
+   TOTAL: 537 hechos + 370 reglas = 907 clausulas

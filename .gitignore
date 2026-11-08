@@ -3,3 +3,8 @@ __pycache__/
 *$py.class
 .vscode/
 .idea/
+
+# Archivos auxiliares del aprendizaje (escritura atomica / respaldo)
+*.pl.tmp
+*.pl.bak
+*.pl.danado
