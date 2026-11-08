@@ -1,0 +1,584 @@
+ARBOL LOGICO DE ArquiSelect (generado por generar_arbol_logico.pl)
+Sangria = nivel de llamada.  !  = corte.  \+ = negacion por fallo.
+[cl i/n] = clausula i de n, en el orden en que Prolog las prueba.
+[hechos: n] = predicado definido solo con hechos.
+
+diagnosticar_arquitectura/9
+  [cl 1/2]
+    bloqueo_duro/3
+      [cl 1/1]
+        contradicciones/3
+          [cl 1/1]
+            preparar_requisitos/2
+              [cl 1/1]
+                preparar_requisitos/3
+                  [cl 1/1]
+                    validar_entrada/2
+                      [cl 1/2]
+                        !
+                        normalizar_lista/2
+                          [cl 1/3] hecho
+                          [cl 2/3]
+                            !
+                            normalizar_lista/2  (ver arriba)
+                          [cl 3/3]
+                            normalizar_lista/2  (ver arriba)
+                      [cl 2/2] hecho
+                    filtrar_validos/2
+                      [cl 1/3] hecho
+                      [cl 2/3]
+                        requisito_conocido/1
+                          [cl 1/1]
+                            requisito_categoria/2  [hechos: 20]
+                        !
+                        filtrar_validos/2  (ver arriba)
+                      [cl 3/3]
+                        filtrar_validos/2  (ver arriba)
+                    desconocidos/2
+                      [cl 1/3] hecho
+                      [cl 2/3]
+                        requisito_conocido/1  (ver arriba)
+                        !
+                        desconocidos/2  (ver arriba)
+                      [cl 3/3]
+                        desconocidos/2  (ver arriba)
+            preparar_requisitos/2  (ver arriba)
+            conflicto/6
+              [cl 1/2]
+                contradiccion/4
+                  [cl 1/4]
+                    excluyentes/2  [hechos: 1]
+                  [cl 2/4] hecho
+                  [cl 3/4] hecho
+                  [cl 4/4] hecho
+              [cl 2/2]
+    !
+    preparar_requisitos/3  (ver arriba)
+  [cl 2/2]
+    preparar_requisitos/3  (ver arriba)
+    suficiencia/2
+      [cl 1/3]
+        !
+      [cl 2/3]
+        !
+      [cl 3/3] hecho
+    perfil_proyecto/2
+      [cl 1/2]
+        perfil/2  [hechos: 3]
+        contiene_todos/2
+          [cl 1/2] hecho
+          [cl 2/2]
+            contiene_todos/2  (ver arriba)
+        !
+      [cl 2/2] hecho
+    mejor_estilo/3
+      [cl 1/2]
+        ranking/2
+          [cl 1/3]
+            !
+          [cl 2/3]
+            recomendar/5
+              [cl 1/1]
+                estilo_viable/2
+                  [cl 1/1]
+                    estilo/2  [hechos: 11]
+                    \+ motivo_descarte(A,B,C)
+                      motivo_descarte/3
+                        [cl 1/2]
+                          incompatible/2  [hechos: 8]
+                        [cl 2/2]
+                          regla_descarta/3
+                            [cl 1/1]
+                puntaje/3
+                  [cl 1/1]
+                    aporte_total/3
+                      [cl 1/1]
+                        atributos_requeridos/2
+                          [cl 1/2]
+                            atributo_requerido/2
+                              [cl 1/1]
+                                requisito_atributo/2  [hechos: 19]
+                            !
+                          [cl 2/2] hecho
+                        aporta/3  [hechos: 64]
+                    penalizacion_total/3
+                      [cl 1/1]
+                        penaliza/3  [hechos: 28]
+                    bonus_reglas/3
+                      [cl 1/1]
+                nivel_prioridad/2
+                  [cl 1/3]
+                    umbral_prioridad/2  [hechos: 2]
+                    !
+                  [cl 2/3]
+                    umbral_prioridad/2  (ver arriba)
+                    !
+                  [cl 3/3] hecho
+                nivel_riesgo/3
+                  [cl 1/3]
+                    penalizacion_total/3  (ver arriba)
+                    !
+                  [cl 2/3]
+                    penalizacion_total/3  (ver arriba)
+                    !
+                  [cl 3/3] hecho
+            !
+          [cl 3/3] hecho
+        !
+      [cl 2/2] hecho
+    ranking/2  (ver arriba)
+    descartados/2
+      [cl 1/2]
+        estilo/2  (ver arriba)
+        motivo_descarte/3  (ver arriba)
+        !
+      [cl 2/2] hecho
+    razones/3
+      [cl 1/1]
+        atributo_requerido/2  (ver arriba)
+        aporta/3  (ver arriba)
+        penaliza/3  (ver arriba)
+
+que_falta/6
+  [cl 1/2]
+    bloqueo_duro/3  (ver arriba)
+    !
+    confianza_estado/2  [hechos: 5]
+  [cl 2/2]
+    preparar_requisitos/2  (ver arriba)
+    preparar_requisitos/2  (ver arriba)
+    estado_dictamen/2
+      [cl 1/5]
+        !
+      [cl 2/5]
+        suficiencia/2  (ver arriba)
+        !
+      [cl 3/5]
+        mejor_puntaje/2
+          [cl 1/2]
+            ranking/2  (ver arriba)
+            !
+          [cl 2/2] hecho
+        umbral_prioridad/2  (ver arriba)
+        !
+      [cl 4/5]
+        margen_lider/2
+          [cl 1/2]
+            ranking/2  (ver arriba)
+            !
+          [cl 2/2] hecho
+        umbral_desempate/1  [hechos: 1]
+        !
+      [cl 5/5] hecho
+    confianza_estado/2  (ver arriba)
+    hipotesis_en_competencia/2
+      [cl 1/3]
+        estado_dictamen/2  (ver arriba)
+        !
+        ranking/2  (ver arriba)
+        umbral_desempate/1  (ver arriba)
+      [cl 2/3]
+        ranking/2  (ver arriba)
+        !
+        max_competidores/1  [hechos: 1]
+        primeros/3
+          [cl 1/3]
+            !
+          [cl 2/3]
+            !
+          [cl 3/3]
+            primeros/3  (ver arriba)
+      [cl 3/3]
+        estilo_viable/2  (ver arriba)
+    sugerencias_desempate/4
+      [cl 1/2]
+        !
+      [cl 2/2]
+        dato_candidato/3
+          [cl 1/1]
+            requisito_categoria/2  (ver arriba)
+            \+ memberchk(A,B)
+            \+ memberchk(A,B)
+            \+ choca_con_ingresado(A,B)
+              choca_con_ingresado/2
+                [cl 1/1]
+                  ( alternativa
+                    excluyentes/2  (ver arriba)
+                  ;
+                    excluyentes/2  (ver arriba)
+                  )
+        poder_desempate/5
+          [cl 1/1]
+            efecto_dato/5
+              [cl 1/3]
+                incompatible/2  (ver arriba)
+                !
+                peso_exclusion/1  [hechos: 1]
+              [cl 2/3]
+                regla_descarta/3  (ver arriba)
+                \+ regla_descarta(A,B,C)
+                  regla_descarta/3  (ver arriba)
+                !
+                peso_exclusion/1  (ver arriba)
+              [cl 3/3]
+                puntaje/3  (ver arriba)
+                puntaje/3  (ver arriba)
+                tipo_cambio/2
+                  [cl 1/3]
+                    !
+                  [cl 2/3]
+                    !
+                  [cl 3/3] hecho
+            poder_segun_cantidad/4
+              [cl 1/2]
+                !
+              [cl 2/2]
+        pregunta/2  [hechos: 20]
+        valores_de_pares/2
+          [cl 1/2] hecho
+          [cl 2/2]
+            valores_de_pares/2  (ver arriba)
+        max_sugerencias/1  [hechos: 1]
+        primeros/3  (ver arriba)
+
+consistencia_entrada/4
+  [cl 1/1]
+    contradicciones/3  (ver arriba)
+    estado_consistencia/2
+      [cl 1/3]
+        !
+      [cl 2/3]
+        !
+      [cl 3/3] hecho
+
+interpretar_texto/5
+  [cl 1/2]
+    texto_demasiado_largo/2
+      [cl 1/1]
+        !
+        limite_interpretacion/2  [hechos: 2]
+    !
+  [cl 2/2]
+    limite_interpretacion/2  (ver arriba)
+    interpretar_seguro/5
+      [cl 1/1]
+        normalizar_texto/2
+          [cl 1/2]
+            texto_a_codigos/2
+              [cl 1/1]
+                !
+            !
+            tokens/3
+              [cl 1/1]
+                separadores/2
+                  [cl 1/2]
+                    separador/1
+                      [cl 1/3]
+                        !
+                      [cl 2/3]
+                        !
+                      [cl 3/3]
+                    !
+                    separadores/2  (ver arriba)
+                  [cl 2/2]
+                tokens_resto/3
+                  [cl 1/2]
+                    token/3
+                      [cl 1/4]
+                        letra/3
+                          [cl 1/1]
+                            es_letra/1
+                              [cl 1/2]
+                                !
+                              [cl 2/2]
+                                \+ code_type(A,digit(B))
+                        letras/3
+                          [cl 1/2]
+                            letra/3  (ver arriba)
+                            !
+                            letras/3  (ver arriba)
+                          [cl 2/2]
+                      [cl 2/4]
+                        digito/3
+                          [cl 1/1]
+                        digitos/3
+                          [cl 1/3]
+                            digito/3  (ver arriba)
+                            !
+                            digitos/3  (ver arriba)
+                          [cl 2/3]
+                            digito/3  (ver arriba)
+                            digito/3  (ver arriba)
+                            digito/3  (ver arriba)
+                            \+ digito(A,B,C)
+                              digito/3  (ver arriba)
+                            !
+                            digitos/3  (ver arriba)
+                          [cl 3/3]
+                      [cl 3/4]
+                        coma/1  [hechos: 2]
+                      [cl 4/4]
+                        simbolo/3
+                          [cl 1/1]
+                            es_simbolo/1
+                              [cl 1/1]
+                                \+ es_letra(A)
+                                  es_letra/1  (ver arriba)
+                                \+ between(48,57,A)
+                                \+ coma(A)
+                                  coma/1  (ver arriba)
+                                \+ separador(A)
+                                  separador/1  (ver arriba)
+                        simbolos/3
+                          [cl 1/2]
+                            simbolo/3  (ver arriba)
+                            !
+                            simbolos/3  (ver arriba)
+                          [cl 2/2]
+                    !
+                    separadores/2  (ver arriba)
+                    tokens_resto/3  (ver arriba)
+                  [cl 2/2]
+            !
+          [cl 2/2] hecho
+        oracion/3
+          [cl 1/1]
+            sintagmas/3
+              [cl 1/4]
+                sintagma/3
+                  [cl 1/1]
+                    conectores/3
+                      [cl 1/2]
+                        conector/1  [hechos: 8]
+                        conectores/3  (ver arriba)
+                      [cl 2/2]
+                    negacion_opcional/3
+                      [cl 1/2]
+                      [cl 2/2]
+                        negador/1  [hechos: 5]
+                    rellenos/3
+                      [cl 1/2]
+                      [cl 2/2]
+                        relleno/1
+                          [cl 1/1]
+                        rellenos/3  (ver arriba)
+                    nucleo/3
+                      [cl 1/2]
+                        frase_lexica/3
+                          [cl 1/1]
+                            resto/3  [hechos: 1]
+                            coincidencia_mas_larga/4
+                              [cl 1/1]
+                                lexico/3  [hechos: 162]
+                                prefijo/2
+                                  [cl 1/2] hecho
+                                  [cl 2/2]
+                                    prefijo/2  (ver arriba)
+                                !
+                            consumir/3
+                              [cl 1/2]
+                              [cl 2/2]
+                                consumir/3  (ver arriba)
+                      [cl 2/2]
+                        frase_numerica/3
+                          [cl 1/1]
+                            patron_numerico/4
+                              [cl 1/6]
+                                numero/3
+                                  [cl 1/4]
+                                    !
+                                  [cl 2/4]
+                                    numeral/2  [hechos: 25]
+                                    !
+                                  [cl 3/4]
+                                  [cl 4/4]
+                                    numeral/2  (ver arriba)
+                                unidad_personas_opcional/2
+                                  [cl 1/2]
+                                    unidad_personas/2
+                                      [cl 1/1]
+                                  [cl 2/2]
+                              [cl 2/6]
+                                numero/3  (ver arriba)
+                                unidad_personas_opcional/2  (ver arriba)
+                              [cl 3/6]
+                                numero/3  (ver arriba)
+                                unidad_personas/2  (ver arriba)
+                              [cl 4/6]
+                                cuantificador_opcional/2
+                                  [cl 1/8] hecho
+                                  [cl 2/8] hecho
+                                  [cl 3/8] hecho
+                                  [cl 4/8] hecho
+                                  [cl 5/8] hecho
+                                  [cl 6/8] hecho
+                                  [cl 7/8] hecho
+                                  [cl 8/8]
+                                numero/3  (ver arriba)
+                                unidad_usuarios/2
+                                  [cl 1/1]
+                                calificador_usuarios_opcional/2
+                                  [cl 1/2]
+                                  [cl 2/2]
+                              [cl 5/6]
+                                verbo_respuesta_opcional/2
+                                  [cl 1/2]
+                                  [cl 2/2]
+                                en_opcional/2
+                                  [cl 1/2] hecho
+                                  [cl 2/2]
+                                cuantificador_opcional/2  (ver arriba)
+                                numero/3  (ver arriba)
+                                unidad_tiempo_respuesta/3
+                                  [cl 1/2]
+                                  [cl 2/2]
+                              [cl 6/6]
+                                verbo_entrega_opcional/2
+                                  [cl 1/2]
+                                  [cl 2/2]
+                                en_opcional/2  (ver arriba)
+                                cuantificador_opcional/2  (ver arriba)
+                                numero/3  (ver arriba)
+                                unidad_plazo/3
+                                  [cl 1/3]
+                                  [cl 2/3]
+                                  [cl 3/3]
+                                a_semanas/3
+                                  [cl 1/3] hecho
+                                  [cl 2/3]
+                                  [cl 3/3]
+                            requisito_por_umbral/3
+                              [cl 1/2]
+                                magnitud_requisito/2  [hechos: 5]
+                                umbral_numerico/3  [hechos: 5]
+                                cumple_umbral/3
+                                  [cl 1/4]
+                                  [cl 2/4]
+                                  [cl 3/4]
+                                  [cl 4/4]
+                                !
+                              [cl 2/2] hecho
+                !
+                sintagmas/3  (ver arriba)
+              [cl 2/4]
+                palabra_funcional/1
+                  [cl 1/3]
+                    relleno/1  (ver arriba)
+                    !
+                  [cl 2/3]
+                    conector/1  (ver arriba)
+                    !
+                  [cl 3/3]
+                    negador/1  (ver arriba)
+                !
+                sintagmas/3  (ver arriba)
+              [cl 3/4]
+                !
+                sintagmas/3  (ver arriba)
+              [cl 4/4]
+        !
+        mencion/3
+          [cl 1/1]
+            nucleo_requisito/3  [hechos: 2]
+            requisito_categoria/2  (ver arriba)
+            polaridad_final/3  [hechos: 3]
+        resolver_menciones/3
+          [cl 1/1]
+            ultima_polaridad/3
+              [cl 1/1]
+            ultima_polaridad/3  (ver arriba)
+    resultado_por_error/5
+      [cl 1/2]
+        !
+      [cl 2/2] hecho
+
+candidatos/2
+  [cl 1/1]
+    preparar_requisitos/2  (ver arriba)
+    ranking/2  (ver arriba)
+
+explicar_diagnostico/5
+  [cl 1/1]
+    preparar_requisitos/3  (ver arriba)
+    mejor_estilo/3  (ver arriba)
+    regla_disparada/3
+      [cl 1/16]
+        requisito_categoria/2  (ver arriba)
+      [cl 2/16]
+        suficiencia/2  (ver arriba)
+      [cl 3/16]
+        requisito_atributo/2  (ver arriba)
+      [cl 4/16]
+        perfil_proyecto/2  (ver arriba)
+      [cl 5/16]
+        estilo_viable/2  (ver arriba)
+      [cl 6/16]
+        atributos_requeridos/2  (ver arriba)
+        aporta/3  (ver arriba)
+      [cl 7/16]
+        penaliza/3  (ver arriba)
+      [cl 8/16]
+        texto_efecto_regla/4
+          [cl 1/2]
+            !
+          [cl 2/2]
+      [cl 9/16]
+        aporte_total/3  (ver arriba)
+        penalizacion_total/3  (ver arriba)
+        bonus_reglas/3  (ver arriba)
+        puntaje/3  (ver arriba)
+        detalle_puntaje/6
+          [cl 1/2]
+            !
+          [cl 2/2]
+      [cl 10/16]
+        puntaje/3  (ver arriba)
+        nivel_prioridad/2  (ver arriba)
+      [cl 11/16]
+        nivel_riesgo/3  (ver arriba)
+        penalizacion_total/3  (ver arriba)
+      [cl 12/16]
+        recomendar/5  (ver arriba)
+      [cl 13/16]
+        ranking/2  (ver arriba)
+        detalle_primer_lugar/4
+          [cl 1/2]
+            !
+          [cl 2/2]
+      [cl 14/16]
+        mejor_estilo/3  (ver arriba)
+      [cl 15/16]
+        mejor_estilo/3  (ver arriba)
+      [cl 16/16]
+        estado_dictamen/2  (ver arriba)
+        confianza_estado/2  (ver arriba)
+    hechos_verdaderos/2
+      [cl 1/1]
+        requisito_categoria/2  (ver arriba)
+        atributo_o_ninguno/2
+          [cl 1/2]
+            requisito_atributo/2  (ver arriba)
+            !
+          [cl 2/2] hecho
+    hipotesis_descartada/3
+      [cl 1/2]
+        estilo/2  (ver arriba)
+        motivo_descarte/3  (ver arriba)
+        texto_motivo/2
+          [cl 1/2]
+            !
+          [cl 2/2] hecho
+        cubiertos/4
+          [cl 1/1]
+            atributos_requeridos/2  (ver arriba)
+            aporta/3  (ver arriba)
+      [cl 2/2]
+        estilo_viable/2  (ver arriba)
+        puntaje/3  (ver arriba)
+        cubiertos/4  (ver arriba)
+        relacionado_con_caso/3
+          [cl 1/2]
+            !
+          [cl 2/2]
+            penalizacion_total/3  (ver arriba)
+

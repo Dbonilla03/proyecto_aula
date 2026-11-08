@@ -1,0 +1,124 @@
+==============================================================================
+EVIDENCIA DE PRUEBAS - ArquiSelect: CONTRADICCIONES Y ROBUSTEZ DEL DCG
+Fecha: 2026-11-08 12:49:51   Python 3.13.14   pyswip 0.3.3   SO Windows 11
+SWI-Prolog 100002
+==============================================================================
+
+[A1] Cada par duro bloquea diagnosticar_arquitectura/9 y que_falta/6, en ambos ordenes
+   OK     ['equipo_pequeno', 'equipo_grande']: ('bloqueado', 'ninguno', 'bloqueado', [], 'contradictorio', [], [])
+          por que : (consistencia, Mejor, Prioridad, Ranking, Estado qf, Competencia, Sugerencias)
+   OK     ['equipo_grande', 'equipo_pequeno']: ('bloqueado', 'ninguno', 'bloqueado', [], 'contradictorio', [], [])
+          por que : (consistencia, Mejor, Prioridad, Ranking, Estado qf, Competencia, Sugerencias)
+   OK     ['equipo_pequeno', 'presupuesto_bajo', 'equipo_grande']: ('bloqueado', 'ninguno', 'bloqueado', [], 'contradictorio', [], [])
+          por que : (consistencia, Mejor, Prioridad, Ranking, Estado qf, Competencia, Sugerencias)
+   OK     ['latencia_critica', 'procesos_largos']: ('bloqueado', 'ninguno', 'bloqueado', [], 'contradictorio', [], [])
+          por que : (consistencia, Mejor, Prioridad, Ranking, Estado qf, Competencia, Sugerencias)
+   OK     ['procesos_largos', 'latencia_critica']: ('bloqueado', 'ninguno', 'bloqueado', [], 'contradictorio', [], [])
+          por que : (consistencia, Mejor, Prioridad, Ranking, Estado qf, Competencia, Sugerencias)
+   OK     ['latencia_critica', 'presupuesto_bajo', 'procesos_largos']: ('bloqueado', 'ninguno', 'bloqueado', [], 'contradictorio', [], [])
+          por que : (consistencia, Mejor, Prioridad, Ranking, Estado qf, Competencia, Sugerencias)
+
+[A2] Requisito afirmado y negado a la vez (Requisitos y Negados)
+   OK     consistencia_entrada: ('bloqueado', [['presupuesto_bajo', 'presupuesto_bajo', 'dura', 'Contradiccion: presupuesto_bajo esta marcado como requisito y tambien como "no aplica".']])
+   OK     que_falta/6: ('contradictorio', 'nula', [])
+          por que : 1a clausula de que_falta/6
+   OK     diagnosticar/9 NO lo ve (su firma no recibe Negados): True
+          por que : por eso la interfaz decide con el Estado de que_falta/6
+   OK     sin el negado ya no hay bloqueo: 'consistente'
+
+[A3] Mensaje de Prolog para el par excluyente (reutiliza excluyentes/2)
+   OK     Razones: ['Contradiccion: equipo_pequeno y equipo_grande son excluyentes; el proyecto no puede tener los dos.']
+          por que : el orden del mensaje sale de excluyentes/2
+   OK     Perfil y Suficiencia: ('ninguno', 'contradictoria')
+
+[A4] Steadfast: llamar con Mejor ya fijado no se salta el bloqueo
+   OK     diagnosticar_arquitectura(..., monolito_capas, ...) falla: None
+          por que : las salidas se ligan despues del corte
+
+[B1] Cada tension advierte y NO bloquea, en ambos ordenes
+   OK     ['disponibilidad_alta', 'presupuesto_bajo']: ('advertencia', 1, 'tension', True, True, True)
+          por que : (Estado, n, Tipo, hay recomendacion, prioridad normal, que_falta normal)
+   OK     ['presupuesto_bajo', 'disponibilidad_alta']: ('advertencia', 1, 'tension', True, True, True)
+          por que : (Estado, n, Tipo, hay recomendacion, prioridad normal, que_falta normal)
+   OK     ['consistencia_estricta', 'integracion_asincrona']: ('advertencia', 1, 'tension', True, True, True)
+          por que : (Estado, n, Tipo, hay recomendacion, prioridad normal, que_falta normal)
+   OK     ['integracion_asincrona', 'consistencia_estricta']: ('advertencia', 1, 'tension', True, True, True)
+          por que : (Estado, n, Tipo, hay recomendacion, prioridad normal, que_falta normal)
+
+[B2] La tension no se mete en el diagnostico (solo la informa consistencia_entrada/4)
+   OK     Ranking no vacio: True
+   OK     Razones sin el aviso de tension: False
+          por que : diagnosticar_arquitectura/9 solo cambia con contradicciones duras
+
+[C1] Caso normal: consistente
+   OK     consistencia_entrada: ('consistente', [])
+
+[C2] Mayusculas, repetidos y desconocidos pasan por preparar_requisitos/2
+   OK     mayusculas: 'bloqueado'
+          por que : downcase_atom/2
+   OK     repetido: una sola contradiccion: 1
+          por que : list_to_set/2
+   OK     Desconocidos se siguen informando: ['xyz']
+
+[C3] Dura + tension juntas: manda la dura y se listan las dos
+   OK     Estado: 'bloqueado'
+          por que : 1a clausula de estado_consistencia/2
+   OK     Tipos: ['dura', 'tension']
+
+[C4] Entradas no lista no rompen contradicciones/3
+   OK     contradicciones(hola, f(x), L): ([], 'consistente')
+          por que : validar_entrada/2 devuelve [] con algo que no es lista
+
+[D1] La caja 'Describe tu proyecto' llega al mismo bloqueo / aviso
+   OK     texto 1 -> requisitos: ['equipo_pequeno', 'equipo_grande']
+          por que : umbrales 5 y 10
+   OK     texto 1 -> bloqueado: 'bloqueado'
+   OK     texto 2 -> bloqueado: 'bloqueado'
+   OK     texto 3 -> advertencia: 'advertencia'
+
+[E1] 10 entradas hostiles: sin excepcion, resultado esperado y Prolog sigue vivo
+   OK     vacio: (([], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+   OK     solo espacios, tab y salto de linea: (([], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+   OK     solo emojis: (([], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+   OK     emoji en medio de una frase valida: ((['equipo_pequeno', 'presupuesto_bajo'], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+   OK     intento de inyeccion sin comillas: (([], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+   OK     comillas simples y dobles: (([], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+   OK     inyeccion con barra y comilla: (([], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+   OK     caracteres de control (NUL, BEL, ESC): ((['equipo_pequeno'], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+   OK     surrogate suelto (emoji partido): ((['presupuesto_bajo'], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+   OK     texto muy largo (4500 caracteres): (([], []), True)
+          por que : ((Requisitos, Negados), Prolog vivo)
+
+[E2] Limite de longitud: 2000 se analiza, 2001 se rechaza con aviso
+   OK     2000 caracteres: (['presupuesto_bajo'], [])
+   OK     2001 caracteres: ([], ['(texto demasiado largo: maximo 2000 caracteres)'])
+          por que : 1a clausula de interpretar_texto/5
+   OK     4500 caracteres: ['(texto demasiado largo: maximo 2000 caracteres)']
+
+[E3] Limite de tiempo: con un limite minimo el analisis se corta y avisa
+   OK     con limite normal (2 s): ['equipo_pequeno', 'presupuesto_bajo']
+   OK     con limite 0.000001 s: ([], ['(tiempo de analisis agotado)'])
+          por que : call_with_time_limit/2 lanza time_limit_exceeded y catch/3 lo atrapa
+   OK     restaurado: ['presupuesto_bajo']
+
+[F1] Interfaz: banner rojo sin recomendacion, banner ambar con diagnostico, texto hostil
+   OK     dura: estilo / fondo rojo / sin banner ambar: ('⛔ Sin recomendación', '#fef2f2', False)
+   OK     dura: el banner muestra el mensaje de Prolog: True
+   OK     dura: guardar en historial se niega: ['showwarning']
+   OK     tension: hay recomendacion y banner ambar visible: (True, True)
+   OK     tension: texto del banner: True
+   OK     texto hostil: la app sigue y no hay dialogo de error: (False, False)
+   OK     marcado + No aplica: banner rojo: ('⛔ Sin recomendación', '#fef2f2')
+          por que : Python ya no quita el negado: decide Prolog
+
+==============================================================================
+RESULTADO: 53/53 verificaciones correctas, 0 fallas.
